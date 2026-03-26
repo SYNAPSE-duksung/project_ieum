@@ -1,0 +1,7 @@
+data/
+models/
+outputs/
+*.pth
+*.wav
+*.mp3
+*.log
