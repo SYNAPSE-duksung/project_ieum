@@ -1,0 +1,137 @@
+/* ===========================
+   Popup
+=========================== */
+
+body.popup{
+
+    width:280px;
+
+    margin:0;
+
+    padding:20px;
+
+    font-family:Arial, Helvetica, sans-serif;
+
+    background:#f5f5f5;
+
+}
+
+body.popup h2{
+
+    text-align:center;
+
+    margin-top:0;
+
+}
+
+#audioInput{
+
+    width:100%;
+
+    margin-bottom:15px;
+
+}
+
+#filename{
+
+    text-align:center;
+
+    font-size:13px;
+
+    color:#666;
+
+    margin-bottom:15px;
+
+}
+
+#sendBtn{
+
+    width:100%;
+
+    padding:12px;
+
+    background:#4285F4;
+
+    color:white;
+
+    border:none;
+
+    border-radius:8px;
+
+    cursor:pointer;
+
+    font-size:16px;
+
+}
+
+#sendBtn:hover{
+
+    background:#2f6fe4;
+
+}
+
+#status{
+
+    margin-top:15px;
+
+    text-align:center;
+
+    font-weight:bold;
+
+}
+
+
+
+/* ===========================
+   Google Meet Caption
+=========================== */
+
+#ieum-caption{
+
+    position:fixed;
+
+    left:50%;
+
+    bottom:80px;
+
+    transform:translateX(-50%) translateY(20px);
+
+    min-width:450px;
+
+    max-width:900px;
+
+    padding:18px 30px;
+
+    background:rgba(0,0,0,0.82);
+
+    color:white;
+
+    font-size:28px;
+
+    font-weight:bold;
+
+    text-align:center;
+
+    border-radius:16px;
+
+    z-index:999999;
+
+    opacity:0;
+
+    transition:all .35s ease;
+
+    pointer-events:none;
+
+    line-height:1.5;
+
+    box-shadow:0 8px 25px rgba(0,0,0,.35);
+
+}
+
+#ieum-caption.show{
+
+    opacity:1;
+
+    transform:translateX(-50%) translateY(0);
+
+}
