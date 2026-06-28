@@ -313,5 +313,5 @@ Chrome Extension으로부터 전송된 음성 파일은 FastAPI 서버에서 수
 아래는 IEUM 시스템의 실제 실행 화면입니다.
 
 <p align="center">
-  <img src="docs/ieum_demo_video.gif" alt="IEUM Demo" width="800"/>
+  <img src="docs/ieum_demo_video.gif" alt="IEUM Demo"/>
 </p>
