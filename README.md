@@ -107,41 +107,102 @@ requirements.txt
 
 # Installation
 
+## 1. Clone Repository
+
 ```bash
 git clone <repository_url>
+cd Project_ieum
+```
 
-cd ieum_demo
+> **Note**
+> Repository를 clone하면 `Project_ieum` 폴더가 생성됩니다.
 
+---
+
+## 2. Create Virtual Environment
+
+Python **3.10 이상**을 권장합니다.
+
+```bash
+py -3.11 -m venv venv
+```
+
+### Activate Virtual Environment
+
+**Git Bash**
+
+```bash
+source venv/Scripts/activate
+```
+
+**PowerShell**
+
+```powershell
+venv\Scripts\Activate.ps1
+```
+
+가상환경이 활성화되면 터미널 앞에 `(venv)`가 표시됩니다.
+
+---
+
+## 3. Install Dependencies
+
+```bash
 pip install -r requirements.txt
 ```
+
+> **Note**
+>
+> `fastapi==0.138.1` 설치 오류가 발생하면 Python 버전이 3.10 미만인 경우입니다.
+> Python 3.10 이상으로 가상환경을 다시 생성한 후 설치를 진행하세요.
 
 ---
 
 # Run
 
-FastAPI 실행
+## 1. Start FastAPI Server
 
 ```bash
 cd backend
-
 uvicorn main:app --reload
 ```
 
-Chrome
+정상적으로 실행되면 다음과 같은 로그가 출력됩니다.
 
-1. chrome://extensions 접속
+```text
+INFO: Uvicorn running on http://127.0.0.1:8000
+INFO: Application startup complete.
+```
 
+> `google.generativeai` 관련 `FutureWarning`은 실행에 영향을 주지 않는 경고 메시지이므로 무시해도 됩니다.
+
+---
+
+## 2. Load Chrome Extension
+
+1. Chrome에서 `chrome://extensions` 접속
 2. 개발자 모드 활성화
+3. **압축해제된 확장 프로그램 로드**
+4. `extension` 폴더 선택
 
-3. 압축해제된 확장 프로그램 로드
+---
 
-4. extension 폴더 선택
+## 3. Run Demo
 
-5. Google Meet 접속
+1. Google Meet 접속
+2. 우측 상단 확장 프로그램 아이콘 클릭
+3. Popup에서 WAV 파일 선택
+4. **자막 시작(Start Subtitle)** 버튼 클릭
 
-6. Popup에서 WAV 파일 선택
+---
 
-7. 자막 시작 버튼 클릭
+## 4. Stop Server
+
+FastAPI 서버 종료
+
+```text
+Ctrl + C
+```
 
 ---
 
