@@ -306,5 +306,5 @@ Chrome Extension으로부터 전송된 음성 파일은 FastAPI 서버에서 수
 
 **PowerPoint**
 
-- [이음_사람과 사람을 이어주는 AI 서비스.pptx](docs/이음_사람과 사람을 이어주는 AI 서비스.pptx)
+- [ieum_presentation.pptx](docs/ieum_presentation.pptx)
 
