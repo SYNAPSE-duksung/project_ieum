@@ -300,11 +300,18 @@ Chrome Extension으로부터 전송된 음성 파일은 FastAPI 서버에서 수
 
 ---
 
-# Presentation
+# Presentation & Demo
 
-프로젝트 발표 자료입니다.
+프로젝트 발표 자료와 데모 영상을 확인할 수 있습니다.
 
-**PowerPoint**
+## Presentation
 
-- [ieum_presentation.pptx](docs/ieum_presentation.pptx)
+- [IEUM Presentation (PDF)](docs/ieum_presentation.pdf)
 
+## Demo
+
+아래는 IEUM 시스템의 실제 실행 화면입니다.
+
+<p align="center">
+  <img src="docs/ieum_demo_video.gif" alt="IEUM Demo" width="800"/>
+</p>
