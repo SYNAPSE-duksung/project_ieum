@@ -1,0 +1,58 @@
+# ============================================================
+# IEUM ASR 기본 실험 설정
+#
+# 이 파일에는 실행 전에 결정하는 조건만 기록한다.
+# loss, CER, WER, 실행 시간 등은 학습 코드가 자동으로 저장한다.
+# ============================================================
+
+project:
+  name: "ieum_asr"
+  seed: 42
+
+data:
+  project_root: "/content/drive/MyDrive/ieum_project"
+
+  alignment_csv: "05_outputs/alignment/word_alignment_final_with_metadata.csv"
+
+  audio_root: "06_preprocessed_audio"
+
+  audio_filename_column: "parent_wav"
+  audio_path_column: "parent_wav_path"
+  segment_id_column: "segment_id"
+  transcript_column: "segment_text"
+  split_column: "split"
+  speaker_column: "speaker_id"
+
+  segment_start_column: "start_sec"
+  segment_end_column: "end_sec"
+
+  sample_rate: 16000
+
+  # Whisper 입력 길이를 고려한 초기 필터
+  max_audio_seconds: 30.0
+  min_audio_seconds: 0.1
+
+  num_workers: 2
+
+whisper:
+  model_name: "openai/whisper-small"
+
+model:
+  architecture: "linear_ctc"
+
+encoder:
+  train_mode: "freeze"
+
+training:
+  # 초기값이며 소규모 예비 실험 후 확정
+  batch_size: 4
+  epochs: 30
+  learning_rate: 0.0001
+  weight_decay: 0.01
+
+  use_amp: true
+  early_stopping_patience: 5
+
+output:
+  root_dir: "outputs"
+  checkpoint_root: "checkpoints"
