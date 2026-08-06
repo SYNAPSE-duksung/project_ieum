@@ -8,8 +8,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 
-from src.config import load_config, resolve_data_paths
-
+from src.asr.config import load_config, resolve_data_paths
 
 def main() -> None:
     config_path = (

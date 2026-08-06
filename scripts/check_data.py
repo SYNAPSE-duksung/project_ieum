@@ -10,8 +10,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 
-from src.config import load_config, resolve_data_paths
-from src.dataset import IEUMDataset
+from src.asr.config import load_config, resolve_data_paths
+from src.asr.dataset import IEUMDataset
 
 
 def print_section(title: str) -> None:
