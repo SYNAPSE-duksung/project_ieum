@@ -19,6 +19,7 @@ from src.asr.config import (
     load_config,
     resolve_data_paths,
 )
+
 from src.asr.dataset import (
     IEUMDataset,
 )
@@ -34,89 +35,19 @@ def print_section(
     print("=" * 70)
 
 
-def check_speaker_leakage(
-    metadata: pd.DataFrame,
-) -> None:
-
-    split_speakers = {
-        split_name: set(
-            group[
-                "speaker_id"
-            ]
-        )
-        for split_name, group
-        in metadata.groupby(
-            "split"
-        )
-    }
-
-    split_names = list(
-        split_speakers.keys()
-    )
-
-    leakage_found = False
-
-    for first_index in range(
-        len(split_names)
-    ):
-        for second_index in range(
-            first_index + 1,
-            len(split_names),
-        ):
-
-            first_split = (
-                split_names[
-                    first_index
-                ]
-            )
-
-            second_split = (
-                split_names[
-                    second_index
-                ]
-            )
-
-            overlap = (
-                split_speakers[
-                    first_split
-                ]
-                & split_speakers[
-                    second_split
-                ]
-            )
-
-            print(
-                f"{first_split} ↔ "
-                f"{second_split}: "
-                f"{len(overlap)}명"
-            )
-
-            if overlap:
-                leakage_found = True
-
-                print(
-                    "중복 화자 예시: "
-                    f"{sorted(overlap)[:10]}"
-                )
-
-    print(
-        "\nSpeaker leakage 존재 여부: "
-        f"{leakage_found}"
-    )
-
-
 def create_dataset(
     config: dict,
+    *,
     load_audio: bool,
 ) -> IEUMDataset:
 
-    paths = (
-        resolve_data_paths(
-            config
-        )
+    paths = resolve_data_paths(
+        config
     )
 
-    data = config["data"]
+    data = config[
+        "data"
+    ]
 
     return IEUMDataset(
         csv_path=(
@@ -150,6 +81,11 @@ def create_dataset(
                 "transcript_column"
             ]
         ),
+        word_column=(
+            data[
+                "word_column"
+            ]
+        ),
         split_column=(
             data[
                 "split_column"
@@ -160,11 +96,6 @@ def create_dataset(
                 "speaker_column"
             ]
         ),
-        word_column=(
-            data[
-                "word_column"
-            ]
-        ),
         segment_start_column=(
             data[
                 "segment_start_column"
@@ -173,6 +104,11 @@ def create_dataset(
         segment_end_column=(
             data[
                 "segment_end_column"
+            ]
+        ),
+        abnormal_duration_column=(
+            data[
+                "abnormal_duration_column"
             ]
         ),
         sample_rate=(
@@ -188,6 +124,75 @@ def create_dataset(
         load_audio=(
             load_audio
         ),
+    )
+
+
+def check_speaker_leakage(
+    metadata: pd.DataFrame,
+) -> None:
+
+    split_speakers = {
+        split_name: set(
+            group[
+                "speaker_id"
+            ]
+        )
+        for split_name, group
+        in metadata.groupby(
+            "split"
+        )
+    }
+
+    split_names = list(
+        split_speakers.keys()
+    )
+
+    leakage_found = False
+
+    for i in range(
+        len(split_names)
+    ):
+
+        for j in range(
+            i + 1,
+            len(split_names),
+        ):
+
+            split_a = (
+                split_names[i]
+            )
+
+            split_b = (
+                split_names[j]
+            )
+
+            overlap = (
+                split_speakers[
+                    split_a
+                ]
+                & split_speakers[
+                    split_b
+                ]
+            )
+
+            print(
+                f"{split_a} ↔ "
+                f"{split_b}: "
+                f"{len(overlap)}명"
+            )
+
+            if overlap:
+
+                leakage_found = True
+
+                print(
+                    "중복 화자: "
+                    f"{sorted(overlap)[:10]}"
+                )
+
+    print(
+        "\nSpeaker leakage 존재 여부: "
+        f"{leakage_found}"
     )
 
 
@@ -207,6 +212,7 @@ def main() -> None:
         config
     )
 
+    # ============================================================
     print_section(
         "1. 데이터 경로 확인"
     )
@@ -224,24 +230,22 @@ def main() -> None:
     if not paths[
         "csv_path"
     ].exists():
+
         raise FileNotFoundError(
-            "CSV 파일을 찾을 수 없습니다.\n"
-            f"확인한 경로: "
-            f"{paths['csv_path']}"
+            "CSV 파일을 찾을 수 없습니다."
         )
 
     print(
         "CSV 파일 존재: True"
     )
 
-    # ---------------------------------------------------------
-
+    # ============================================================
     print_section(
         "2. Dataset 생성"
     )
 
     dataset = create_dataset(
-        config=config,
+        config,
         load_audio=False,
     )
 
@@ -249,8 +253,11 @@ def main() -> None:
         "Dataset 생성 성공"
     )
 
-    # ---------------------------------------------------------
+    metadata = (
+        dataset.get_metadata()
+    )
 
+    # ============================================================
     print_section(
         "3. Dataset 요약"
     )
@@ -262,67 +269,64 @@ def main() -> None:
     for key, value in (
         summary.items()
     ):
+
         print(
             f"{key}: {value}"
         )
 
-    metadata = (
-        dataset.get_metadata()
-    )
-
-    # ---------------------------------------------------------
-
+    # ============================================================
     print_section(
         "4. 원래 segment 보존 확인"
     )
 
-    original_segment_count = (
+    original_count = (
         metadata[
             "original_sample_id"
         ]
         .nunique()
     )
 
-    final_chunk_count = len(
-        metadata
+    final_count = (
+        len(metadata)
     )
 
     print(
-        "원래 segment 수: "
-        f"{original_segment_count}"
+        f"원래 segment 수: "
+        f"{original_count}"
     )
 
     print(
-        "최종 학습 chunk 수: "
-        f"{final_chunk_count}"
+        f"최종 chunk 수: "
+        f"{final_count}"
     )
 
     print(
-        "추가 생성 chunk 수: "
-        f"{final_chunk_count - original_segment_count}"
+        "추가 생성된 chunk 수: "
+        f"{final_count - original_count}"
     )
 
-    print(
-        "30초 초과로 분할된 원래 segment 수: "
-        f"{(
+    chunked_count = (
+        metadata[
             metadata[
-                metadata[
-                    'chunk_count'
-                ] > 1
-            ][
-                'original_sample_id'
-            ]
-            .nunique()
-        )}"
+                "chunk_count"
+            ] > 1
+        ][
+            "original_sample_id"
+        ]
+        .nunique()
     )
 
-    # ---------------------------------------------------------
+    print(
+        "분할된 원래 segment 수: "
+        f"{chunked_count}"
+    )
 
+    # ============================================================
     print_section(
         "5. Split별 원래 segment 수"
     )
 
-    original_split = (
+    original_metadata = (
         metadata[
             [
                 "original_sample_id",
@@ -338,8 +342,8 @@ def main() -> None:
         )
     )
 
-    original_split_summary = (
-        original_split.groupby(
+    original_summary = (
+        original_metadata.groupby(
             "split"
         )
         .agg(
@@ -359,17 +363,15 @@ def main() -> None:
     )
 
     print(
-        original_split_summary
-        .to_string()
+        original_summary.to_string()
     )
 
-    # ---------------------------------------------------------
-
+    # ============================================================
     print_section(
         "6. Split별 최종 chunk 수"
     )
 
-    chunk_summary = (
+    final_summary = (
         metadata.groupby(
             "split"
         )
@@ -390,63 +392,68 @@ def main() -> None:
     )
 
     print(
-        chunk_summary.to_string()
+        final_summary.to_string()
     )
 
-    # ---------------------------------------------------------
-
+    # ============================================================
     print_section(
         "7. Chunk 길이 분포"
     )
 
+    duration = metadata[
+        "duration_seconds"
+    ]
+
     print(
-        metadata[
-            "duration_seconds"
-        ]
-        .describe(
+        duration.describe(
             percentiles=[
-                0.25,
                 0.50,
-                0.75,
                 0.90,
                 0.95,
                 0.99,
             ]
-        )
-        .to_string()
+        ).to_string()
     )
 
-    max_duration = (
-        metadata[
-            "duration_seconds"
-        ].max()
+    max_audio_seconds = float(
+        config["data"]["max_audio_seconds"]
+    )
+
+    over_30_count = int(
+        (
+            duration
+            > max_audio_seconds + 1e-6
+        ).sum()
+    )
+
+    under_01_count = int(
+        (
+            duration < 0.1
+        ).sum()
     )
 
     print(
-        "\n최대 chunk 길이: "
-        f"{max_duration:.4f}초"
+        f"\n{max_audio_seconds}초 초과 chunk 수: "
+        f"{over_30_count}"
     )
 
-    if (
-        max_duration
-        > config[
-            "data"
-        ][
-            "max_audio_seconds"
-        ]
-        + 1e-6
-    ):
+    print(
+        "0.1초 미만 chunk 수: "
+        f"{under_01_count}"
+    )
+
+    if over_30_count > 0:
         raise ValueError(
-            "30초를 초과한 chunk가 존재합니다."
+            "Whisper 최대 입력 길이를 초과하는 "
+            "chunk가 존재합니다."
         )
-
-    # ---------------------------------------------------------
-
+    
+    # ============================================================
     print_section(
-        "8. 중복 ID 확인"
+        "8. 중복 sample_id 확인"
     )
 
-    duplicate_sample_ids = (
+    duplicate_count = int(
         metadata[
             "sample_id"
         ]
@@ -455,12 +462,11 @@ def main() -> None:
     )
 
     print(
-        "중복 sample_id 수: "
-        f"{duplicate_sample_ids}"
+        f"중복 sample_id 수: "
+        f"{duplicate_count}"
     )
 
-    # ---------------------------------------------------------
-
+    # ============================================================
     print_section(
         "9. Speaker Leakage 확인"
     )
@@ -469,28 +475,30 @@ def main() -> None:
         metadata
     )
 
-    # ---------------------------------------------------------
-
+    # ============================================================
     print_section(
-        "10. 분할된 segment 예시"
+        "10. Chunk 분할 예시"
     )
 
-    chunked_examples = (
+    examples = (
         metadata[
             metadata[
                 "chunk_count"
             ] > 1
         ]
-        .head(10)
+        .head(15)
     )
 
-    if chunked_examples.empty:
+    if examples.empty:
+
         print(
-            "분할된 segment 없음"
+            "분할된 segment가 없습니다."
         )
+
     else:
+
         print(
-            chunked_examples[
+            examples[
                 [
                     "sample_id",
                     "original_sample_id",
@@ -506,15 +514,14 @@ def main() -> None:
             )
         )
 
-    # ---------------------------------------------------------
-
+    # ============================================================
     print_section(
         "11. 실제 음성 1개 로딩 검사"
     )
 
     audio_dataset = (
         create_dataset(
-            config=config,
+            config,
             load_audio=True,
         )
     )
@@ -544,7 +551,7 @@ def main() -> None:
     )
 
     print(
-        "Metadata 기준 길이: "
+        "metadata 길이: "
         f"{sample['duration_seconds']:.4f}초"
     )
 
@@ -558,6 +565,7 @@ def main() -> None:
         f"{sample['transcript']}"
     )
 
+    # ============================================================
     print_section(
         "데이터 검사 완료"
     )

@@ -65,29 +65,18 @@ def set_seed(
     seed: int,
 ) -> None:
 
-    random.seed(
-        seed
-    )
-
-    np.random.seed(
-        seed
-    )
-
-    torch.manual_seed(
-        seed
-    )
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
 
     if torch.cuda.is_available():
+
         torch.cuda.manual_seed_all(
             seed
         )
 
 
 class CTCCollator:
-    """
-    Dataset의 waveform + transcript를
-    CTC 학습 batch로 변환한다.
-    """
 
     def __init__(
         self,
@@ -185,7 +174,10 @@ class CTCCollator:
 
 
 def create_dataset(
-    config: dict[str, Any],
+    config: dict[
+        str,
+        Any,
+    ],
     split: str,
 ) -> IEUMDataset:
 
@@ -212,74 +204,69 @@ def create_dataset(
                 "audio_root"
             ]
         ),
-        split=split,
-
+        split=(
+            split
+        ),
         audio_filename_column=(
             data[
                 "audio_filename_column"
             ]
         ),
-
         audio_path_column=(
             data[
                 "audio_path_column"
             ]
         ),
-
         segment_id_column=(
             data[
                 "segment_id_column"
             ]
         ),
-
         transcript_column=(
             data[
                 "transcript_column"
             ]
         ),
-
-        split_column=(
-            data[
-                "split_column"
-            ]
-        ),
-
-        speaker_column=(
-            data[
-                "speaker_column"
-            ]
-        ),
-
         word_column=(
             data[
                 "word_column"
             ]
         ),
-
+        split_column=(
+            data[
+                "split_column"
+            ]
+        ),
+        speaker_column=(
+            data[
+                "speaker_column"
+            ]
+        ),
         segment_start_column=(
             data[
                 "segment_start_column"
             ]
         ),
-
         segment_end_column=(
             data[
                 "segment_end_column"
             ]
         ),
-
+        abnormal_duration_column=(
+            data[
+                "abnormal_duration_column"
+            ]
+        ),
         sample_rate=(
             data[
                 "sample_rate"
             ]
         ),
-
         max_audio_seconds=(
             data[
                 "max_audio_seconds"
             ]
         ),
-
         load_audio=True,
     )
 
@@ -288,7 +275,10 @@ def create_downstream_model(
     architecture: str,
     input_dim: int,
     vocab_size: int,
-    config: dict[str, Any],
+    config: dict[
+        str,
+        Any,
+    ],
 ) -> torch.nn.Module:
 
     model_config = (
@@ -304,26 +294,16 @@ def create_downstream_model(
         )
     )
 
-    if (
-        architecture
-        == "linear_ctc"
-    ):
+    if architecture == "linear_ctc":
+
         return LinearCTC(
-            input_dim=(
-                input_dim
-            ),
-            vocab_size=(
-                vocab_size
-            ),
-            dropout=(
-                dropout
-            ),
+            input_dim=input_dim,
+            vocab_size=vocab_size,
+            dropout=dropout,
         )
 
-    if (
-        architecture
-        == "bigru_ctc"
-    ):
+    if architecture == "bigru_ctc":
+
         settings = (
             model_config[
                 "bigru"
@@ -331,12 +311,8 @@ def create_downstream_model(
         )
 
         return BiGRUCTC(
-            input_dim=(
-                input_dim
-            ),
-            vocab_size=(
-                vocab_size
-            ),
+            input_dim=input_dim,
+            vocab_size=vocab_size,
             hidden_size=(
                 settings[
                     "hidden_size"
@@ -347,15 +323,11 @@ def create_downstream_model(
                     "num_layers"
                 ]
             ),
-            dropout=(
-                dropout
-            ),
+            dropout=dropout,
         )
 
-    if (
-        architecture
-        == "transformer_ctc"
-    ):
+    if architecture == "transformer_ctc":
+
         settings = (
             model_config[
                 "transformer"
@@ -363,12 +335,8 @@ def create_downstream_model(
         )
 
         return TransformerCTC(
-            input_dim=(
-                input_dim
-            ),
-            vocab_size=(
-                vocab_size
-            ),
+            input_dim=input_dim,
+            vocab_size=vocab_size,
             hidden_size=(
                 settings[
                     "hidden_size"
@@ -389,15 +357,11 @@ def create_downstream_model(
                     "feedforward_size"
                 ]
             ),
-            dropout=(
-                dropout
-            ),
+            dropout=dropout,
         )
 
-    if (
-        architecture
-        == "conformer_ctc"
-    ):
+    if architecture == "conformer_ctc":
+
         settings = (
             model_config[
                 "conformer"
@@ -405,12 +369,8 @@ def create_downstream_model(
         )
 
         return ConformerCTC(
-            input_dim=(
-                input_dim
-            ),
-            vocab_size=(
-                vocab_size
-            ),
+            input_dim=input_dim,
+            vocab_size=vocab_size,
             hidden_size=(
                 settings[
                     "hidden_size"
@@ -436,13 +396,11 @@ def create_downstream_model(
                     "convolution_kernel_size"
                 ]
             ),
-            dropout=(
-                dropout
-            ),
+            dropout=dropout,
         )
 
     raise ValueError(
-        "지원하지 않는 모델입니다: "
+        f"지원하지 않는 모델: "
         f"{architecture}"
     )
 
@@ -485,22 +443,16 @@ def main() -> None:
         / args.config
     )
 
-    config = (
-        load_config(
-            config_path
-        )
+    config = load_config(
+        config_path
     )
 
-    seed = (
+    set_seed(
         config[
             "project"
         ][
             "seed"
         ]
-    )
-
-    set_seed(
-        seed
     )
 
     architecture = (
@@ -519,15 +471,9 @@ def main() -> None:
         else "cpu"
     )
 
-    print(
-        "=" * 70
-    )
-    print(
-        "IEUM ASR 학습 시작"
-    )
-    print(
-        "=" * 70
-    )
+    print("=" * 70)
+    print("IEUM ASR 학습 시작")
+    print("=" * 70)
 
     print(
         f"Device: {device}"
@@ -547,9 +493,9 @@ def main() -> None:
         f"{config['encoder']['train_mode']}"
     )
 
-    # =========================================================
+    # ============================================================
     # Dataset
-    # =========================================================
+    # ============================================================
 
     print()
     print(
@@ -580,9 +526,9 @@ def main() -> None:
         f"{len(valid_dataset)}"
     )
 
-    # =========================================================
+    # ============================================================
     # Tokenizer
-    # =========================================================
+    # ============================================================
 
     train_metadata = (
         train_dataset
@@ -603,9 +549,9 @@ def main() -> None:
         f"{tokenizer.vocab_size}"
     )
 
-    # =========================================================
-    # Feature Extractor
-    # =========================================================
+    # ============================================================
+    # Feature extractor
+    # ============================================================
 
     feature_extractor = (
         IEUMWhisperFeatureExtractor(
@@ -644,31 +590,33 @@ def main() -> None:
         )
     )
 
-    # =========================================================
+    # ============================================================
     # DataLoader
-    # =========================================================
+    # ============================================================
+
+    batch_size = (
+        config[
+            "training"
+        ][
+            "batch_size"
+        ]
+    )
+
+    num_workers = (
+        config[
+            "data"
+        ][
+            "num_workers"
+        ]
+    )
 
     train_loader = (
         DataLoader(
             train_dataset,
-            batch_size=(
-                config[
-                    "training"
-                ][
-                    "batch_size"
-                ]
-            ),
+            batch_size=batch_size,
             shuffle=True,
-            num_workers=(
-                config[
-                    "data"
-                ][
-                    "num_workers"
-                ]
-            ),
-            collate_fn=(
-                collator
-            ),
+            num_workers=num_workers,
+            collate_fn=collator,
             pin_memory=(
                 device.type
                 == "cuda"
@@ -679,24 +627,10 @@ def main() -> None:
     valid_loader = (
         DataLoader(
             valid_dataset,
-            batch_size=(
-                config[
-                    "training"
-                ][
-                    "batch_size"
-                ]
-            ),
+            batch_size=batch_size,
             shuffle=False,
-            num_workers=(
-                config[
-                    "data"
-                ][
-                    "num_workers"
-                ]
-            ),
-            collate_fn=(
-                collator
-            ),
+            num_workers=num_workers,
+            collate_fn=collator,
             pin_memory=(
                 device.type
                 == "cuda"
@@ -704,9 +638,9 @@ def main() -> None:
         )
     )
 
-    # =========================================================
+    # ============================================================
     # Whisper Encoder
-    # =========================================================
+    # ============================================================
 
     print(
         "Whisper Encoder 로딩..."
@@ -737,9 +671,9 @@ def main() -> None:
         .trainable_parameter_summary(),
     )
 
-    # =========================================================
-    # Downstream Model
-    # =========================================================
+    # ============================================================
+    # Downstream
+    # ============================================================
 
     downstream_model = (
         create_downstream_model(
@@ -760,9 +694,7 @@ def main() -> None:
 
     model = (
         CTCASRModel(
-            encoder=(
-                encoder
-            ),
+            encoder=encoder,
             downstream_model=(
                 downstream_model
             ),
@@ -776,9 +708,9 @@ def main() -> None:
         )
     )
 
-    # =========================================================
+    # ============================================================
     # Optimizer
-    # =========================================================
+    # ============================================================
 
     trainable_parameters = [
         parameter
@@ -807,9 +739,9 @@ def main() -> None:
         )
     )
 
-    # =========================================================
+    # ============================================================
     # Output
-    # =========================================================
+    # ============================================================
 
     timestamp = (
         datetime.now()
@@ -841,77 +773,67 @@ def main() -> None:
         / "vocab.json"
     )
 
-    # =========================================================
+    # ============================================================
     # Trainer
-    # =========================================================
+    # ============================================================
 
-    trainer = CTCTrainer(
-        model=(
-            model
-        ),
-        tokenizer=(
-            tokenizer
-        ),
-        optimizer=(
-            optimizer
-        ),
-        device=(
-            device
-        ),
-        use_amp=(
-            config[
-                "training"
-            ][
-                "use_amp"
-            ]
-        ),
-        gradient_clip_norm=1.0,
+    trainer = (
+        CTCTrainer(
+            model=model,
+            tokenizer=tokenizer,
+            optimizer=optimizer,
+            device=device,
+            use_amp=(
+                config[
+                    "training"
+                ][
+                    "use_amp"
+                ]
+            ),
+            gradient_clip_norm=1.0,
+        )
     )
 
-    summary = trainer.fit(
-        train_loader=(
-            train_loader
-        ),
-        valid_loader=(
-            valid_loader
-        ),
-        epochs=(
-            config[
-                "training"
-            ][
-                "epochs"
-            ]
-        ),
-        output_dir=(
-            output_dir
-        ),
-        early_stopping_patience=(
-            config[
-                "training"
-            ][
-                "early_stopping_patience"
-            ]
-        ),
+    summary = (
+        trainer.fit(
+            train_loader=(
+                train_loader
+            ),
+            valid_loader=(
+                valid_loader
+            ),
+            epochs=(
+                config[
+                    "training"
+                ][
+                    "epochs"
+                ]
+            ),
+            output_dir=(
+                output_dir
+            ),
+            early_stopping_patience=(
+                config[
+                    "training"
+                ][
+                    "early_stopping_patience"
+                ]
+            ),
+        )
     )
 
     print()
-    print(
-        "=" * 70
-    )
-    print(
-        "학습 완료"
-    )
-    print(
-        "=" * 70
-    )
+    print("=" * 70)
+    print("학습 완료")
+    print("=" * 70)
 
     print(
-        "Best epoch: "
+        f"Best epoch: "
         f"{summary['best_epoch']}"
     )
 
     print(
-        "Best CER: "
+        f"Best CER: "
         f"{summary['best_valid_cer']:.4f}"
     )
 

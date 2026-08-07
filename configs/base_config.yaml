@@ -2,7 +2,7 @@
 # IEUM ASR 기본 실험 설정
 #
 # 실행 전에 결정하는 실험 조건만 기록한다.
-# loss, CER, WER, 실행 시간 등은 학습 과정에서 자동 저장한다.
+# loss, CER, WER 등은 학습 코드에서 자동 저장한다.
 # ============================================================
 
 project:
@@ -13,7 +13,6 @@ data:
   project_root: "/content/drive/MyDrive/ieum_project"
 
   alignment_csv: "05_outputs/alignment/word_alignment_final_with_metadata.csv"
-
   audio_root: "06_preprocessed_audio"
 
   # CSV 컬럼
@@ -23,24 +22,23 @@ data:
   segment_id_column: "segment_id"
   transcript_column: "segment_text"
 
+  word_column: "word"
+
   split_column: "split"
   speaker_column: "speaker_id"
 
-  # Word Alignment 컬럼
-  word_column: "word"
   segment_start_column: "start_sec"
   segment_end_column: "end_sec"
 
+  abnormal_duration_column: "abnormal_duration"
+
   sample_rate: 16000
 
-  # Whisper 입력 제한
-  # 30초 초과 segment는 삭제하지 않고
-  # word alignment 경계에서 여러 chunk로 분할한다.
+  # Whisper 최대 입력 길이.
+  # 초과 segment는 삭제하지 않고 chunk로 분할한다.
   max_audio_seconds: 30.0
 
   num_workers: 2
-
-  abnormal_duration_column: "abnormal_duration"
 
 
 whisper:
@@ -80,7 +78,6 @@ encoder:
 
 
 training:
-  # 초기 실험값
   batch_size: 4
   epochs: 30
   learning_rate: 0.0001
