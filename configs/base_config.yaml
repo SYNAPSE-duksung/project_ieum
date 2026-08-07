@@ -40,6 +40,25 @@ whisper:
 model:
   architecture: "linear_ctc"
 
+  dropout: 0.1
+
+  bigru:
+    hidden_size: 512
+    num_layers: 2
+
+  transformer:
+    hidden_size: 512
+    num_layers: 4
+    num_heads: 8
+    feedforward_size: 2048
+
+  conformer:
+    hidden_size: 512
+    num_layers: 4
+    num_heads: 8
+    feedforward_size: 2048
+    convolution_kernel_size: 31
+
 encoder:
   train_mode: "freeze"
 
