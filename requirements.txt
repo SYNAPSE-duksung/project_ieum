@@ -2,3 +2,5 @@ PyYAML==6.0.3
 pandas
 torch
 torchaudio
+transformers
+jiwer
