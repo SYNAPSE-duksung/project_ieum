@@ -325,15 +325,6 @@ class IEUMDataset(Dataset):
                 word_end - word_start
             )
 
-            # 한 단어 자체가 Whisper 최대 길이를 넘는 경우는
-            # word boundary 기반 분할로 해결할 수 없다.
-            if word_duration > self.max_audio_seconds:
-                raise ValueError(
-                    "한 단어 alignment 구간이 "
-                    "Whisper 최대 입력 길이를 초과합니다.\n"
-                    f"word: {row[self.word_column]}\n"
-                    f"duration: {word_duration:.4f}초"
-                )
 
             if not current_indices:
                 current_indices = [

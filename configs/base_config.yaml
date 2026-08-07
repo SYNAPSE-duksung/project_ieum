@@ -40,6 +40,8 @@ data:
 
   num_workers: 2
 
+  abnormal_duration_column: "abnormal_duration"
+
 
 whisper:
   model_name: "openai/whisper-small"

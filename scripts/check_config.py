@@ -36,9 +36,8 @@ def main() -> None:
     print(f"정답 문장 컬럼: {data_config['transcript_column']}")
     print(f"샘플링 레이트: {data_config['sample_rate']}")
     print(
-        "음성 길이 범위: "
-        f"{data_config['min_audio_seconds']}초"
-        f" ~ {data_config['max_audio_seconds']}초"
+    "Whisper 최대 입력 길이: "
+    f"{data_config['max_audio_seconds']}초"
     )
 
     print(f"Whisper 모델: {config['whisper']['model_name']}")
