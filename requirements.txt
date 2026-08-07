@@ -4,3 +4,4 @@ torch
 torchaudio
 transformers
 jiwer
+soundfile
