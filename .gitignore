@@ -1,6 +1,4 @@
 # Data and model artifacts
-data/
-models/
 outputs/
 checkpoints/
 logs/
