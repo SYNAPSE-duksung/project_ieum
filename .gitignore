@@ -27,3 +27,6 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+# Raspberry Pi temporary audio
+recorded_audio.wav

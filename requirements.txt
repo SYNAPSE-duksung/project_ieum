@@ -6,3 +6,8 @@ transformers
 jiwer
 soundfile
 tqdm
+fastapi
+uvicorn
+python-multipart
+requests
+sounddevice
