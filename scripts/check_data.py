@@ -116,6 +116,11 @@ def create_dataset(
                 "sample_rate"
             ]
         ),
+        min_chunk_seconds=(
+            data[
+                "min_chunk_seconds"
+            ]
+        ),
         max_audio_seconds=(
             data[
                 "max_audio_seconds"

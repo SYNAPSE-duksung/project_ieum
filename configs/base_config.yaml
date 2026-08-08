@@ -34,8 +34,8 @@ data:
 
   sample_rate: 16000
 
-  # Whisper 최대 입력 길이.
-  # 초과 segment는 삭제하지 않고 chunk로 분할한다.
+  # 촤종 학습 chunck 길이
+  min_chunk_seconds: 0.1
   max_audio_seconds: 30.0
 
   num_workers: 2
