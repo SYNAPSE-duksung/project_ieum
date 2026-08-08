@@ -1,8 +1,5 @@
 # ============================================================
 # IEUM ASR 기본 실험 설정
-#
-# 실행 전에 결정하는 실험 조건만 기록한다.
-# loss, CER, WER 등은 학습 코드에서 자동 저장한다.
 # ============================================================
 
 project:
@@ -15,13 +12,11 @@ data:
   alignment_csv: "05_outputs/alignment/word_alignment_final_with_metadata.csv"
   audio_root: "06_preprocessed_audio"
 
-  # CSV 컬럼
   audio_filename_column: "parent_wav"
   audio_path_column: "parent_wav_path"
 
   segment_id_column: "segment_id"
   transcript_column: "segment_text"
-
   word_column: "word"
 
   split_column: "split"
@@ -34,7 +29,6 @@ data:
 
   sample_rate: 16000
 
-  # 촤종 학습 chunck 길이
   min_chunk_seconds: 0.1
   max_audio_seconds: 30.0
 
@@ -79,12 +73,23 @@ encoder:
 
 training:
   batch_size: 4
+
+  # 4개 구조 비교용 최대 epoch
   epochs: 10
+
   learning_rate: 0.0001
   weight_decay: 0.01
 
   use_amp: true
+
   early_stopping_patience: 3
+
+  # Encoder가 freeze일 때만 사용
+  use_feature_cache: true
+
+  # Colab 로컬 SSD에 저장
+  # 런타임이 종료되면 없어져도 괜찮음.
+  feature_cache_root: "/content/ieum_feature_cache"
 
 
 output:

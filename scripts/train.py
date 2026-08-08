@@ -11,9 +11,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from torch.utils.data import (
-    DataLoader,
-)
+from torch.utils.data import DataLoader
 
 
 PROJECT_ROOT = Path(
@@ -21,6 +19,7 @@ PROJECT_ROOT = Path(
 ).resolve().parents[1]
 
 if str(PROJECT_ROOT) not in sys.path:
+
     sys.path.insert(
         0,
         str(PROJECT_ROOT),
@@ -40,6 +39,11 @@ from src.asr.encoder import (
     WhisperEncoder,
 )
 
+from src.asr.feature_cache import (
+    CachedFeatureDataset,
+    build_feature_cache,
+)
+
 from src.asr.feature_extractor import (
     IEUMWhisperFeatureExtractor,
 )
@@ -56,6 +60,7 @@ from src.asr.tokenizer import (
 )
 
 from src.asr.trainer import (
+    CachedCTCModel,
     CTCASRModel,
     CTCTrainer,
 )
@@ -65,9 +70,17 @@ def set_seed(
     seed: int,
 ) -> None:
 
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+    random.seed(
+        seed
+    )
+
+    np.random.seed(
+        seed
+    )
+
+    torch.manual_seed(
+        seed
+    )
 
     if torch.cuda.is_available():
 
@@ -76,7 +89,10 @@ def set_seed(
         )
 
 
-class CTCCollator:
+class RawCTCCollator:
+    """
+    Encoder fine-tuning용 collator.
+    """
 
     def __init__(
         self,
@@ -95,9 +111,15 @@ class CTCCollator:
     def __call__(
         self,
         samples: list[
-            dict[str, Any]
+            dict[
+                str,
+                Any,
+            ]
         ],
-    ) -> dict[str, Any]:
+    ) -> dict[
+        str,
+        Any,
+    ]:
 
         waveforms = [
             sample[
@@ -114,39 +136,16 @@ class CTCCollator:
         ]
 
         feature_batch = (
-            self.feature_extractor.batch(
+            self.feature_extractor
+            .batch(
                 waveforms
             )
         )
 
-        encoded_targets = [
-            self.tokenizer.encode(
-                transcript
-            )
-            for transcript in references
-        ]
-
-        target_lengths = (
-            torch.tensor(
-                [
-                    len(target)
-                    for target
-                    in encoded_targets
-                ],
-                dtype=torch.long,
-            )
-        )
-
-        flattened_targets = (
-            torch.tensor(
-                [
-                    token
-                    for target
-                    in encoded_targets
-                    for token
-                    in target
-                ],
-                dtype=torch.long,
+        target_data = (
+            encode_targets(
+                references,
+                self.tokenizer,
             )
         )
 
@@ -162,15 +161,202 @@ class CTCCollator:
                 ]
             ),
             "targets": (
-                flattened_targets
+                target_data[
+                    "targets"
+                ]
             ),
             "target_lengths": (
-                target_lengths
+                target_data[
+                    "target_lengths"
+                ]
             ),
             "references": (
                 references
             ),
         }
+
+
+class CachedCTCCollator:
+    """
+    Whisper Encoder feature cache용 collator.
+    """
+
+    def __init__(
+        self,
+        tokenizer: CTCCharacterTokenizer,
+    ) -> None:
+
+        self.tokenizer = (
+            tokenizer
+        )
+
+    def __call__(
+        self,
+        samples: list[
+            dict[
+                str,
+                Any,
+            ]
+        ],
+    ) -> dict[
+        str,
+        Any,
+    ]:
+
+        references = [
+            sample[
+                "transcript"
+            ]
+            for sample in samples
+        ]
+
+        input_lengths = (
+            torch.tensor(
+                [
+                    sample[
+                        "input_length"
+                    ]
+                    for sample
+                    in samples
+                ],
+                dtype=(
+                    torch.long
+                ),
+            )
+        )
+
+        max_length = int(
+            input_lengths.max()
+            .item()
+        )
+
+        hidden_size = int(
+            samples[
+                0
+            ][
+                "hidden_states"
+            ].shape[
+                -1
+            ]
+        )
+
+        hidden_states = (
+            torch.zeros(
+                (
+                    len(samples),
+                    max_length,
+                    hidden_size,
+                ),
+                dtype=(
+                    torch.float32
+                ),
+            )
+        )
+
+        for index, sample in enumerate(
+            samples
+        ):
+
+            length = int(
+                sample[
+                    "input_length"
+                ]
+            )
+
+            hidden_states[
+                index,
+                :length,
+            ] = (
+                sample[
+                    "hidden_states"
+                ]
+                .float()
+            )
+
+        target_data = (
+            encode_targets(
+                references,
+                self.tokenizer,
+            )
+        )
+
+        return {
+            "hidden_states": (
+                hidden_states
+            ),
+            "input_lengths": (
+                input_lengths
+            ),
+            "targets": (
+                target_data[
+                    "targets"
+                ]
+            ),
+            "target_lengths": (
+                target_data[
+                    "target_lengths"
+                ]
+            ),
+            "references": (
+                references
+            ),
+        }
+
+
+def encode_targets(
+    references: list[
+        str
+    ],
+    tokenizer: CTCCharacterTokenizer,
+) -> dict[
+    str,
+    torch.Tensor,
+]:
+
+    encoded_targets = [
+        tokenizer.encode(
+            text
+        )
+        for text
+        in references
+    ]
+
+    target_lengths = (
+        torch.tensor(
+            [
+                len(target)
+                for target
+                in encoded_targets
+            ],
+            dtype=(
+                torch.long
+            ),
+        )
+    )
+
+    flattened_targets = (
+        torch.tensor(
+            [
+                token
+                for target
+                in encoded_targets
+                for token
+                in target
+            ],
+            dtype=(
+                torch.long
+            ),
+        )
+    )
+
+    return {
+        "targets": (
+            flattened_targets
+        ),
+        "target_lengths": (
+            target_lengths
+        ),
+    }
 
 
 def create_dataset(
@@ -405,7 +591,7 @@ def create_downstream_model(
         )
 
     raise ValueError(
-        f"지원하지 않는 모델: "
+        "지원하지 않는 모델: "
         f"{architecture}"
     )
 
@@ -448,8 +634,10 @@ def main() -> None:
         / args.config
     )
 
-    config = load_config(
-        config_path
+    config = (
+        load_config(
+            config_path
+        )
     )
 
     set_seed(
@@ -462,12 +650,36 @@ def main() -> None:
 
     architecture = (
         args.model
-        if args.model is not None
+        if args.model
+        is not None
         else config[
             "model"
         ][
             "architecture"
         ]
+    )
+
+    encoder_mode = (
+        config[
+            "encoder"
+        ][
+            "train_mode"
+        ]
+    )
+
+    requested_cache = bool(
+        config[
+            "training"
+        ].get(
+            "use_feature_cache",
+            False,
+        )
+    )
+
+    use_feature_cache = (
+        requested_cache
+        and encoder_mode
+        == "freeze"
     )
 
     device = torch.device(
@@ -489,17 +701,17 @@ def main() -> None:
     )
 
     print(
-        "Whisper: "
-        f"{config['whisper']['model_name']}"
+        f"Encoder mode: "
+        f"{encoder_mode}"
     )
 
     print(
-        "Encoder mode: "
-        f"{config['encoder']['train_mode']}"
+        f"Feature cache: "
+        f"{use_feature_cache}"
     )
 
     # ============================================================
-    # Dataset
+    # Raw Dataset
     # ============================================================
 
     print()
@@ -507,14 +719,14 @@ def main() -> None:
         "Dataset 생성 중..."
     )
 
-    train_dataset = (
+    train_raw = (
         create_dataset(
             config,
             "train",
         )
     )
 
-    valid_dataset = (
+    valid_raw = (
         create_dataset(
             config,
             "valid",
@@ -523,39 +735,35 @@ def main() -> None:
 
     print(
         f"Train chunks: "
-        f"{len(train_dataset)}"
+        f"{len(train_raw)}"
     )
 
     print(
         f"Valid chunks: "
-        f"{len(valid_dataset)}"
+        f"{len(valid_raw)}"
     )
 
     # ============================================================
     # Tokenizer
     # ============================================================
 
-    train_metadata = (
-        train_dataset
-        .get_metadata()
-    )
-
     tokenizer = (
         CTCCharacterTokenizer
         .build_from_texts(
-            train_metadata[
+            train_raw
+            .get_metadata()[
                 "transcript"
             ]
         )
     )
 
     print(
-        "Vocabulary size: "
+        f"Vocabulary size: "
         f"{tokenizer.vocab_size}"
     )
 
     # ============================================================
-    # Feature extractor
+    # Whisper components
     # ============================================================
 
     feature_extractor = (
@@ -584,73 +792,6 @@ def main() -> None:
         )
     )
 
-    collator = (
-        CTCCollator(
-            feature_extractor=(
-                feature_extractor
-            ),
-            tokenizer=(
-                tokenizer
-            ),
-        )
-    )
-
-    # ============================================================
-    # DataLoader
-    # ============================================================
-
-    batch_size = (
-        config[
-            "training"
-        ][
-            "batch_size"
-        ]
-    )
-
-    num_workers = (
-        config[
-            "data"
-        ][
-            "num_workers"
-        ]
-    )
-
-    train_loader = (
-        DataLoader(
-            train_dataset,
-            batch_size=batch_size,
-            shuffle=True,
-            num_workers=num_workers,
-            collate_fn=collator,
-            pin_memory=(
-                device.type
-                == "cuda"
-            ),
-        )
-    )
-
-    valid_loader = (
-        DataLoader(
-            valid_dataset,
-            batch_size=batch_size,
-            shuffle=False,
-            num_workers=num_workers,
-            collate_fn=collator,
-            pin_memory=(
-                device.type
-                == "cuda"
-            ),
-        )
-    )
-
-    # ============================================================
-    # Whisper Encoder
-    # ============================================================
-
-    print(
-        "Whisper Encoder 로딩..."
-    )
-
     encoder = (
         WhisperEncoder(
             model_name=(
@@ -661,11 +802,7 @@ def main() -> None:
                 ]
             ),
             train_mode=(
-                config[
-                    "encoder"
-                ][
-                    "train_mode"
-                ]
+                encoder_mode
             ),
         )
     )
@@ -677,7 +814,171 @@ def main() -> None:
     )
 
     # ============================================================
-    # Downstream
+    # Cached mode
+    # ============================================================
+
+    if use_feature_cache:
+
+        cache_root = Path(
+            config[
+                "training"
+            ][
+                "feature_cache_root"
+            ]
+        )
+
+        train_cache_dir = (
+            cache_root
+            / "train"
+        )
+
+        valid_cache_dir = (
+            cache_root
+            / "valid"
+        )
+
+        build_feature_cache(
+            dataset=train_raw,
+            feature_extractor=(
+                feature_extractor
+            ),
+            encoder=encoder,
+            cache_dir=(
+                train_cache_dir
+            ),
+            device=device,
+            batch_size=(
+                config[
+                    "training"
+                ][
+                    "batch_size"
+                ]
+            ),
+        )
+
+        build_feature_cache(
+            dataset=valid_raw,
+            feature_extractor=(
+                feature_extractor
+            ),
+            encoder=encoder,
+            cache_dir=(
+                valid_cache_dir
+            ),
+            device=device,
+            batch_size=(
+                config[
+                    "training"
+                ][
+                    "batch_size"
+                ]
+            ),
+        )
+
+        # Encoder 메모리 해제
+        del encoder
+
+        if torch.cuda.is_available():
+
+            torch.cuda.empty_cache()
+
+        train_dataset = (
+            CachedFeatureDataset(
+                train_cache_dir
+            )
+        )
+
+        valid_dataset = (
+            CachedFeatureDataset(
+                valid_cache_dir
+            )
+        )
+
+        collator = (
+            CachedCTCCollator(
+                tokenizer
+            )
+        )
+
+    else:
+
+        train_dataset = (
+            train_raw
+        )
+
+        valid_dataset = (
+            valid_raw
+        )
+
+        collator = (
+            RawCTCCollator(
+                feature_extractor=(
+                    feature_extractor
+                ),
+                tokenizer=(
+                    tokenizer
+                ),
+            )
+        )
+
+    # ============================================================
+    # DataLoader
+    # ============================================================
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=(
+            config[
+                "training"
+            ][
+                "batch_size"
+            ]
+        ),
+        shuffle=True,
+        num_workers=(
+            config[
+                "data"
+            ][
+                "num_workers"
+            ]
+        ),
+        collate_fn=(
+            collator
+        ),
+        pin_memory=(
+            device.type
+            == "cuda"
+        ),
+    )
+
+    valid_loader = DataLoader(
+        valid_dataset,
+        batch_size=(
+            config[
+                "training"
+            ][
+                "batch_size"
+            ]
+        ),
+        shuffle=False,
+        num_workers=(
+            config[
+                "data"
+            ][
+                "num_workers"
+            ]
+        ),
+        collate_fn=(
+            collator
+        ),
+        pin_memory=(
+            device.type
+            == "cuda"
+        ),
+    )
+
+    # ============================================================
+    # Downstream model
     # ============================================================
 
     downstream_model = (
@@ -686,7 +987,7 @@ def main() -> None:
                 architecture
             ),
             input_dim=(
-                encoder.hidden_size
+                768
             ),
             vocab_size=(
                 tokenizer.vocab_size
@@ -697,21 +998,33 @@ def main() -> None:
         )
     )
 
-    model = (
-        CTCASRModel(
-            encoder=encoder,
-            downstream_model=(
+    if use_feature_cache:
+
+        model = (
+            CachedCTCModel(
                 downstream_model
-            ),
-            sample_rate=(
-                config[
-                    "data"
-                ][
-                    "sample_rate"
-                ]
-            ),
+            )
         )
-    )
+
+    else:
+
+        model = (
+            CTCASRModel(
+                encoder=(
+                    encoder
+                ),
+                downstream_model=(
+                    downstream_model
+                ),
+                sample_rate=(
+                    config[
+                        "data"
+                    ][
+                        "sample_rate"
+                    ]
+                ),
+            )
+        )
 
     # ============================================================
     # Optimizer
@@ -779,52 +1092,51 @@ def main() -> None:
     )
 
     # ============================================================
-    # Trainer
+    # Train
     # ============================================================
 
-    trainer = (
-        CTCTrainer(
-            model=model,
-            tokenizer=tokenizer,
-            optimizer=optimizer,
-            device=device,
-            use_amp=(
-                config[
-                    "training"
-                ][
-                    "use_amp"
-                ]
-            ),
-            gradient_clip_norm=1.0,
-        )
+    trainer = CTCTrainer(
+        model=model,
+        tokenizer=tokenizer,
+        optimizer=optimizer,
+        device=device,
+        use_amp=(
+            config[
+                "training"
+            ][
+                "use_amp"
+            ]
+        ),
+        gradient_clip_norm=1.0,
+        use_cached_features=(
+            use_feature_cache
+        ),
     )
 
-    summary = (
-        trainer.fit(
-            train_loader=(
-                train_loader
-            ),
-            valid_loader=(
-                valid_loader
-            ),
-            epochs=(
-                config[
-                    "training"
-                ][
-                    "epochs"
-                ]
-            ),
-            output_dir=(
-                output_dir
-            ),
-            early_stopping_patience=(
-                config[
-                    "training"
-                ][
-                    "early_stopping_patience"
-                ]
-            ),
-        )
+    summary = trainer.fit(
+        train_loader=(
+            train_loader
+        ),
+        valid_loader=(
+            valid_loader
+        ),
+        epochs=(
+            config[
+                "training"
+            ][
+                "epochs"
+            ]
+        ),
+        output_dir=(
+            output_dir
+        ),
+        early_stopping_patience=(
+            config[
+                "training"
+            ][
+                "early_stopping_patience"
+            ]
+        ),
     )
 
     print()
@@ -849,4 +1161,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+
     main()

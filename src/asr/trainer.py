@@ -6,9 +6,11 @@ from typing import Any
 
 import pandas as pd
 import torch
+
 from jiwer import cer, wer
 from torch import Tensor, nn
 from torch.utils.data import DataLoader
+from tqdm.auto import tqdm
 
 from src.asr.encoder import WhisperEncoder
 from src.asr.tokenizer import CTCCharacterTokenizer
@@ -16,7 +18,9 @@ from src.asr.tokenizer import CTCCharacterTokenizer
 
 class CTCASRModel(nn.Module):
     """
-    Whisper Encoder + 후속 CTC 모델을 하나로 연결한다.
+    Whisper Encoder + 후속 CTC 모델.
+
+    Encoder fine-tuning 실험에서 사용한다.
     """
 
     def __init__(
@@ -25,102 +29,307 @@ class CTCASRModel(nn.Module):
         downstream_model: nn.Module,
         sample_rate: int = 16000,
     ) -> None:
+
         super().__init__()
 
         self.encoder = encoder
-        self.downstream_model = downstream_model
-        self.sample_rate = sample_rate
+        self.downstream_model = (
+            downstream_model
+        )
+
+        self.sample_rate = (
+            sample_rate
+        )
 
     def forward(
         self,
         input_features: Tensor,
         audio_num_samples: Tensor,
-    ) -> tuple[Tensor, Tensor]:
+    ) -> tuple[
+        Tensor,
+        Tensor,
+    ]:
 
-        hidden_states = self.encoder(
-            input_features
+        hidden_states = (
+            self.encoder(
+                input_features
+            )
         )
 
-        input_lengths = self.encoder.get_output_lengths(
-            audio_num_samples=audio_num_samples,
-            sample_rate=self.sample_rate,
+        input_lengths = (
+            self.encoder
+            .get_output_lengths(
+                audio_num_samples=(
+                    audio_num_samples
+                ),
+                sample_rate=(
+                    self.sample_rate
+                ),
+            )
         )
 
-        input_lengths = input_lengths.clamp(
-            min=1,
-            max=hidden_states.shape[1],
+        input_lengths = (
+            input_lengths.clamp(
+                min=1,
+                max=(
+                    hidden_states.shape[
+                        1
+                    ]
+                ),
+            )
         )
 
-        logits = self.downstream_model(
-            hidden_states,
-            lengths=input_lengths,
+        logits = (
+            self.downstream_model(
+                hidden_states,
+                lengths=(
+                    input_lengths
+                ),
+            )
         )
 
-        return logits, input_lengths
+        return (
+            logits,
+            input_lengths,
+        )
+
+
+class CachedCTCModel(nn.Module):
+    """
+    미리 계산된 Whisper Encoder hidden state를
+    직접 후속 CTC 모델에 전달한다.
+
+    Encoder Freeze 구조 비교에서 사용한다.
+    """
+
+    def __init__(
+        self,
+        downstream_model: nn.Module,
+    ) -> None:
+
+        super().__init__()
+
+        self.downstream_model = (
+            downstream_model
+        )
+
+    def forward(
+        self,
+        hidden_states: Tensor,
+        input_lengths: Tensor,
+    ) -> tuple[
+        Tensor,
+        Tensor,
+    ]:
+
+        logits = (
+            self.downstream_model(
+                hidden_states,
+                lengths=input_lengths,
+            )
+        )
+
+        return (
+            logits,
+            input_lengths,
+        )
 
 
 class CTCTrainer:
     """
     IEUM ASR CTC 공통 Trainer.
-
-    Linear / BiGRU / Transformer / Conformer 모두
-    동일한 학습 코드로 처리한다.
     """
 
     def __init__(
         self,
-        model: CTCASRModel,
+        model: nn.Module,
         tokenizer: CTCCharacterTokenizer,
         optimizer: torch.optim.Optimizer,
         device: torch.device,
         *,
         use_amp: bool = True,
         gradient_clip_norm: float = 1.0,
+        use_cached_features: bool = False,
     ) -> None:
-        self.model = model.to(device)
-        self.tokenizer = tokenizer
-        self.optimizer = optimizer
-        self.device = device
+
+        self.model = model.to(
+            device
+        )
+
+        self.tokenizer = (
+            tokenizer
+        )
+
+        self.optimizer = (
+            optimizer
+        )
+
+        self.device = (
+            device
+        )
+
+        self.use_cached_features = (
+            use_cached_features
+        )
 
         self.use_amp = (
             use_amp
-            and device.type == "cuda"
+            and device.type
+            == "cuda"
         )
 
-        self.gradient_clip_norm = gradient_clip_norm
-
-        self.ctc_loss = nn.CTCLoss(
-            blank=tokenizer.blank_id,
-            reduction="mean",
-            zero_infinity=True,
+        self.gradient_clip_norm = (
+            gradient_clip_norm
         )
 
-        self.scaler = torch.cuda.amp.GradScaler(
-            enabled=self.use_amp
+        self.ctc_loss = (
+            nn.CTCLoss(
+                blank=(
+                    tokenizer.blank_id
+                ),
+                reduction="mean",
+                zero_infinity=True,
+            )
+        )
+
+        # 최신 PyTorch 방식
+        self.scaler = (
+            torch.amp.GradScaler(
+                "cuda",
+                enabled=(
+                    self.use_amp
+                ),
+            )
         )
 
     def _move_batch(
         self,
-        batch: dict[str, Any],
-    ) -> dict[str, Any]:
+        batch: dict[
+            str,
+            Any,
+        ],
+    ) -> dict[
+        str,
+        Any,
+    ]:
 
-        batch["input_features"] = (
-            batch["input_features"].to(self.device)
+        if self.use_cached_features:
+
+            batch[
+                "hidden_states"
+            ] = (
+                batch[
+                    "hidden_states"
+                ]
+                .to(
+                    self.device,
+                    non_blocking=True,
+                )
+                .float()
+            )
+
+            batch[
+                "input_lengths"
+            ] = (
+                batch[
+                    "input_lengths"
+                ]
+                .to(
+                    self.device,
+                    non_blocking=True,
+                )
+            )
+
+        else:
+
+            batch[
+                "input_features"
+            ] = (
+                batch[
+                    "input_features"
+                ]
+                .to(
+                    self.device,
+                    non_blocking=True,
+                )
+            )
+
+            batch[
+                "audio_num_samples"
+            ] = (
+                batch[
+                    "audio_num_samples"
+                ]
+                .to(
+                    self.device,
+                    non_blocking=True,
+                )
+            )
+
+        batch[
+            "targets"
+        ] = (
+            batch[
+                "targets"
+            ]
+            .to(
+                self.device,
+                non_blocking=True,
+            )
         )
 
-        batch["audio_num_samples"] = (
-            batch["audio_num_samples"].to(self.device)
-        )
-
-        batch["targets"] = (
-            batch["targets"].to(self.device)
-        )
-
-        batch["target_lengths"] = (
-            batch["target_lengths"].to(self.device)
+        batch[
+            "target_lengths"
+        ] = (
+            batch[
+                "target_lengths"
+            ]
+            .to(
+                self.device,
+                non_blocking=True,
+            )
         )
 
         return batch
+
+    def _forward(
+        self,
+        batch: dict[
+            str,
+            Any,
+        ],
+    ) -> tuple[
+        Tensor,
+        Tensor,
+    ]:
+
+        if self.use_cached_features:
+
+            return self.model(
+                hidden_states=(
+                    batch[
+                        "hidden_states"
+                    ]
+                ),
+                input_lengths=(
+                    batch[
+                        "input_lengths"
+                    ]
+                ),
+            )
+
+        return self.model(
+            input_features=(
+                batch[
+                    "input_features"
+                ]
+            ),
+            audio_num_samples=(
+                batch[
+                    "audio_num_samples"
+                ]
+            ),
+        )
 
     def _calculate_loss(
         self,
@@ -130,25 +339,23 @@ class CTCTrainer:
         target_lengths: Tensor,
     ) -> Tensor:
 
-        log_probs = logits.log_softmax(
-            dim=-1
+        log_probs = (
+            logits
+            .log_softmax(
+                dim=-1
+            )
+            .transpose(
+                0,
+                1,
+            )
         )
 
-        # CTCLoss:
-        # [B, T, C] → [T, B, C]
-        log_probs = log_probs.transpose(
-            0,
-            1,
-        )
-
-        loss = self.ctc_loss(
+        return self.ctc_loss(
             log_probs,
             targets,
             input_lengths,
             target_lengths,
         )
-
-        return loss
 
     def train_epoch(
         self,
@@ -160,39 +367,71 @@ class CTCTrainer:
         total_loss = 0.0
         total_batches = 0
 
-        for batch in dataloader:
-            batch = self._move_batch(batch)
+        progress = tqdm(
+            dataloader,
+            desc="Train",
+            leave=False,
+        )
+
+        for batch in progress:
+
+            batch = (
+                self._move_batch(
+                    batch
+                )
+            )
 
             self.optimizer.zero_grad(
                 set_to_none=True
             )
 
             with torch.autocast(
-                device_type=self.device.type,
-                dtype=torch.float16,
-                enabled=self.use_amp,
+                device_type=(
+                    self.device.type
+                ),
+                dtype=(
+                    torch.float16
+                ),
+                enabled=(
+                    self.use_amp
+                ),
             ):
-                logits, input_lengths = self.model(
-                    input_features=batch["input_features"],
-                    audio_num_samples=(
-                        batch["audio_num_samples"]
-                    ),
+
+                (
+                    logits,
+                    input_lengths,
+                ) = self._forward(
+                    batch
                 )
 
-                loss = self._calculate_loss(
-                    logits=logits,
-                    input_lengths=input_lengths,
-                    targets=batch["targets"],
-                    target_lengths=(
-                        batch["target_lengths"]
-                    ),
+                loss = (
+                    self._calculate_loss(
+                        logits=logits,
+                        input_lengths=(
+                            input_lengths
+                        ),
+                        targets=(
+                            batch[
+                                "targets"
+                            ]
+                        ),
+                        target_lengths=(
+                            batch[
+                                "target_lengths"
+                            ]
+                        ),
+                    )
                 )
 
             self.scaler.scale(
                 loss
             ).backward()
 
-            if self.gradient_clip_norm is not None:
+            if (
+                self.gradient_clip_norm
+                is not None
+            ):
+
                 self.scaler.unscale_(
                     self.optimizer
                 )
@@ -208,71 +447,141 @@ class CTCTrainer:
 
             self.scaler.update()
 
-            total_loss += loss.item()
+            current_loss = float(
+                loss.item()
+            )
+
+            total_loss += (
+                current_loss
+            )
+
             total_batches += 1
 
-        return total_loss / max(
-            total_batches,
-            1,
+            progress.set_postfix(
+                loss=(
+                    f"{current_loss:.4f}"
+                )
+            )
+
+        return (
+            total_loss
+            / max(
+                total_batches,
+                1,
+            )
         )
 
     @torch.no_grad()
     def evaluate(
         self,
         dataloader: DataLoader,
-    ) -> dict[str, Any]:
+    ) -> dict[
+        str,
+        Any,
+    ]:
 
         self.model.eval()
 
         total_loss = 0.0
         total_batches = 0
 
-        predictions: list[str] = []
-        references: list[str] = []
+        predictions: list[
+            str
+        ] = []
 
-        for batch in dataloader:
-            batch = self._move_batch(batch)
+        references: list[
+            str
+        ] = []
 
-            logits, input_lengths = self.model(
-                input_features=batch["input_features"],
-                audio_num_samples=(
-                    batch["audio_num_samples"]
-                ),
+        progress = tqdm(
+            dataloader,
+            desc="Valid",
+            leave=False,
+        )
+
+        for batch in progress:
+
+            batch = (
+                self._move_batch(
+                    batch
+                )
             )
 
-            loss = self._calculate_loss(
-                logits=logits,
-                input_lengths=input_lengths,
-                targets=batch["targets"],
-                target_lengths=(
-                    batch["target_lengths"]
-                ),
+            (
+                logits,
+                input_lengths,
+            ) = self._forward(
+                batch
             )
 
-            total_loss += loss.item()
+            loss = (
+                self._calculate_loss(
+                    logits=logits,
+                    input_lengths=(
+                        input_lengths
+                    ),
+                    targets=(
+                        batch[
+                            "targets"
+                        ]
+                    ),
+                    target_lengths=(
+                        batch[
+                            "target_lengths"
+                        ]
+                    ),
+                )
+            )
+
+            current_loss = float(
+                loss.item()
+            )
+
+            total_loss += (
+                current_loss
+            )
+
             total_batches += 1
 
-            predicted_ids = logits.argmax(
-                dim=-1
+            progress.set_postfix(
+                loss=(
+                    f"{current_loss:.4f}"
+                )
+            )
+
+            predicted_ids = (
+                logits.argmax(
+                    dim=-1
+                )
             )
 
             for index in range(
-                predicted_ids.shape[0]
+                predicted_ids.shape[
+                    0
+                ]
             ):
+
                 length = int(
-                    input_lengths[index].item()
+                    input_lengths[
+                        index
+                    ].item()
                 )
 
                 token_ids = (
-                    predicted_ids[index, :length]
+                    predicted_ids[
+                        index,
+                        :length,
+                    ]
                     .detach()
                     .cpu()
                     .tolist()
                 )
 
-                prediction = self.tokenizer.decode(
-                    token_ids,
-                    ctc_decode=True,
+                prediction = (
+                    self.tokenizer.decode(
+                        token_ids,
+                        ctc_decode=True,
+                    )
                 )
 
                 predictions.append(
@@ -280,12 +589,17 @@ class CTCTrainer:
                 )
 
             references.extend(
-                batch["references"]
+                batch[
+                    "references"
+                ]
             )
 
-        average_loss = total_loss / max(
-            total_batches,
-            1,
+        average_loss = (
+            total_loss
+            / max(
+                total_batches,
+                1,
+            )
         )
 
         current_cer = cer(
@@ -299,11 +613,21 @@ class CTCTrainer:
         )
 
         return {
-            "loss": average_loss,
-            "cer": current_cer,
-            "wer": current_wer,
-            "predictions": predictions,
-            "references": references,
+            "loss": (
+                average_loss
+            ),
+            "cer": (
+                current_cer
+            ),
+            "wer": (
+                current_wer
+            ),
+            "predictions": (
+                predictions
+            ),
+            "references": (
+                references
+            ),
         }
 
     def fit(
@@ -314,18 +638,31 @@ class CTCTrainer:
         epochs: int,
         output_dir: str | Path,
         early_stopping_patience: int = 5,
-    ) -> dict[str, Any]:
+    ) -> dict[
+        str,
+        Any,
+    ]:
 
-        output_dir = Path(output_dir)
+        output_dir = Path(
+            output_dir
+        )
 
         output_dir.mkdir(
             parents=True,
             exist_ok=True,
         )
 
-        history: list[dict[str, Any]] = []
+        history: list[
+            dict[
+                str,
+                Any,
+            ]
+        ] = []
 
-        best_cer = float("inf")
+        best_cer = float(
+            "inf"
+        )
+
         best_epoch = 0
         patience_counter = 0
 
@@ -333,6 +670,7 @@ class CTCTrainer:
             1,
             epochs + 1,
         ):
+
             print()
             print("=" * 70)
             print(
@@ -340,25 +678,37 @@ class CTCTrainer:
             )
             print("=" * 70)
 
-            train_loss = self.train_epoch(
-                train_loader
+            train_loss = (
+                self.train_epoch(
+                    train_loader
+                )
             )
 
-            valid_result = self.evaluate(
-                valid_loader
+            valid_result = (
+                self.evaluate(
+                    valid_loader
+                )
             )
 
             epoch_result = {
                 "epoch": epoch,
-                "train_loss": train_loss,
+                "train_loss": (
+                    train_loss
+                ),
                 "valid_loss": (
-                    valid_result["loss"]
+                    valid_result[
+                        "loss"
+                    ]
                 ),
                 "valid_cer": (
-                    valid_result["cer"]
+                    valid_result[
+                        "cer"
+                    ]
                 ),
                 "valid_wer": (
-                    valid_result["wer"]
+                    valid_result[
+                        "wer"
+                    ]
                 ),
             }
 
@@ -389,47 +739,73 @@ class CTCTrainer:
             pd.DataFrame(
                 history
             ).to_csv(
-                output_dir / "history.csv",
+                output_dir
+                / "history.csv",
                 index=False,
                 encoding="utf-8-sig",
             )
 
-            if valid_result["cer"] < best_cer:
-                best_cer = valid_result["cer"]
-                best_epoch = epoch
+            if (
+                valid_result[
+                    "cer"
+                ]
+                < best_cer
+            ):
+
+                best_cer = (
+                    valid_result[
+                        "cer"
+                    ]
+                )
+
+                best_epoch = (
+                    epoch
+                )
+
                 patience_counter = 0
 
                 torch.save(
                     {
-                        "epoch": epoch,
+                        "epoch": (
+                            epoch
+                        ),
                         "model_state_dict": (
-                            self.model.state_dict()
+                            self.model
+                            .state_dict()
                         ),
                         "optimizer_state_dict": (
-                            self.optimizer.state_dict()
+                            self.optimizer
+                            .state_dict()
                         ),
                         "valid_cer": (
-                            valid_result["cer"]
+                            valid_result[
+                                "cer"
+                            ]
                         ),
                         "valid_wer": (
-                            valid_result["wer"]
+                            valid_result[
+                                "wer"
+                            ]
                         ),
                     },
-                    output_dir / "best_model.pt",
+                    output_dir
+                    / "best_model.pt",
                 )
 
-                prediction_dataframe = pd.DataFrame(
+                pd.DataFrame(
                     {
                         "reference": (
-                            valid_result["references"]
+                            valid_result[
+                                "references"
+                            ]
                         ),
                         "prediction": (
-                            valid_result["predictions"]
+                            valid_result[
+                                "predictions"
+                            ]
                         ),
                     }
-                )
-
-                prediction_dataframe.to_csv(
+                ).to_csv(
                     output_dir
                     / "best_valid_predictions.csv",
                     index=False,
@@ -441,6 +817,7 @@ class CTCTrainer:
                 )
 
             else:
+
                 patience_counter += 1
 
                 print(
@@ -453,23 +830,35 @@ class CTCTrainer:
                 patience_counter
                 >= early_stopping_patience
             ):
+
                 print(
                     "Early stopping"
                 )
+
                 break
 
         summary = {
-            "best_epoch": best_epoch,
-            "best_valid_cer": best_cer,
-            "epochs_completed": len(history),
+            "best_epoch": (
+                best_epoch
+            ),
+            "best_valid_cer": (
+                best_cer
+            ),
+            "epochs_completed": (
+                len(
+                    history
+                )
+            ),
         }
 
         with (
-            output_dir / "summary.json"
+            output_dir
+            / "summary.json"
         ).open(
             "w",
             encoding="utf-8",
         ) as file:
+
             json.dump(
                 summary,
                 file,
