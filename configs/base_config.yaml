@@ -89,7 +89,7 @@ training:
 
   # Colab 로컬 SSD에 저장
   # 런타임이 종료되면 없어져도 괜찮음.
-  feature_cache_root: "/content/ieum_feature_cache"
+  feature_cache_root: "/content/drive/MyDrive/ieum_project/feature_cache"
 
 
 output:

@@ -269,16 +269,17 @@ def build_feature_cache(
         # Encoder는 완전히 frozen
         with torch.inference_mode():
 
-            with torch.autocast(
-                device_type=(
-                    device.type
-                ),
-                dtype=torch.float16,
-                enabled=(
-                    device.type
-                    == "cuda"
-                ),
-            ):
+            if device.type == "cuda":
+
+                with torch.autocast(
+                    device_type="cuda",
+                    dtype=torch.float16,
+                ):
+                    hidden_states = encoder(
+                        input_features
+                    )
+
+            else:
 
                 hidden_states = encoder(
                     input_features
