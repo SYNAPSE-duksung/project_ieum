@@ -22,10 +22,10 @@ class IEUMDataset(Dataset):
     2. parent_wav + segment_id를 원래 segment로 본다.
     3. 30초 이하 segment는 그대로 사용한다.
     4. 30초 초과 segment는 단어 start_sec 기준으로
-       최대 30초 이하의 여러 chunk로 나눈다.
+       최대 30초 이하 chunk로 나눈다.
     5. abnormal_duration=True인 단어도 정답에서 삭제하지 않는다.
-       단, 비정상적으로 긴 end_sec 때문에 chunk가 30초를
-       초과하지 않도록 제한한다.
+       단, 비정상적으로 긴 end_sec가 chunk 길이를 늘리지 않도록 한다.
+    6. 최종 생성된 chunk 중 0.1초 미만인 chunk만 제거한다.
     """
 
     def __init__(
@@ -45,6 +45,7 @@ class IEUMDataset(Dataset):
         segment_end_column: str = "end_sec",
         abnormal_duration_column: str = "abnormal_duration",
         sample_rate: int = 16000,
+        min_chunk_seconds: float = 0.1,
         max_audio_seconds: float = 30.0,
         load_audio: bool = True,
     ) -> None:
@@ -66,7 +67,9 @@ class IEUMDataset(Dataset):
         self.abnormal_duration_column = abnormal_duration_column
 
         self.sample_rate = int(sample_rate)
+        self.min_chunk_seconds = float(min_chunk_seconds)
         self.max_audio_seconds = float(max_audio_seconds)
+
         self.load_audio = load_audio
 
         self._validate_csv_path()
@@ -92,10 +95,11 @@ class IEUMDataset(Dataset):
             )
 
     @staticmethod
-    def _to_bool(value: Any) -> bool:
+    def _to_bool(
+        value: Any,
+    ) -> bool:
         """
-        CSV에서 bool이 문자열 등으로 읽혀도
-        안전하게 True/False로 변환한다.
+        CSV의 True/False 값을 안전하게 bool로 변환한다.
         """
 
         if pd.isna(value):
@@ -107,7 +111,9 @@ class IEUMDataset(Dataset):
         if isinstance(value, (int, float)):
             return bool(value)
 
-        normalized = str(value).strip().lower()
+        normalized = str(
+            value
+        ).strip().lower()
 
         return normalized in {
             "true",
@@ -116,7 +122,9 @@ class IEUMDataset(Dataset):
             "y",
         }
 
-    def _load_dataframe(self) -> pd.DataFrame:
+    def _load_dataframe(
+        self,
+    ) -> pd.DataFrame:
 
         dataframe = pd.read_csv(
             self.csv_path
@@ -154,14 +162,18 @@ class IEUMDataset(Dataset):
         dataframe[
             self.segment_start_column
         ] = pd.to_numeric(
-            dataframe[self.segment_start_column],
+            dataframe[
+                self.segment_start_column
+            ],
             errors="coerce",
         )
 
         dataframe[
             self.segment_end_column
         ] = pd.to_numeric(
-            dataframe[self.segment_end_column],
+            dataframe[
+                self.segment_end_column
+            ],
             errors="coerce",
         )
 
@@ -176,7 +188,9 @@ class IEUMDataset(Dataset):
         ]
 
         missing_counts = (
-            dataframe[essential_columns]
+            dataframe[
+                essential_columns
+            ]
             .isna()
             .sum()
         )
@@ -199,7 +213,7 @@ class IEUMDataset(Dataset):
             self._to_bool
         )
 
-        # 기존 split을 그대로 사용
+        # 기존 CSV split을 그대로 유지한다.
         if self.requested_split is not None:
 
             available_splits = sorted(
@@ -215,7 +229,9 @@ class IEUMDataset(Dataset):
                 dataframe[
                     self.split_column
                 ].astype(str)
-                == str(self.requested_split)
+                == str(
+                    self.requested_split
+                )
             ].copy()
 
             if dataframe.empty:
@@ -227,7 +243,7 @@ class IEUMDataset(Dataset):
         return dataframe
 
     # ============================================================
-    # 메타데이터
+    # Metadata
     # ============================================================
 
     @staticmethod
@@ -238,7 +254,9 @@ class IEUMDataset(Dataset):
     ) -> Any:
 
         values = (
-            group[column]
+            group[
+                column
+            ]
             .dropna()
             .unique()
             .tolist()
@@ -260,7 +278,10 @@ class IEUMDataset(Dataset):
         sample_id: str,
     ) -> str | None:
 
-        if self.audio_path_column not in group.columns:
+        if (
+            self.audio_path_column
+            not in group.columns
+        ):
             return None
 
         values = (
@@ -285,7 +306,7 @@ class IEUMDataset(Dataset):
         return values[0]
 
     # ============================================================
-    # Chunk 생성
+    # Chunk
     # ============================================================
 
     def _sort_words(
@@ -293,8 +314,11 @@ class IEUMDataset(Dataset):
         group: pd.DataFrame,
     ) -> pd.DataFrame:
 
-        # 원래 단어 순서가 있으면 우선 사용
-        if "segment_word_index" in group.columns:
+        # 원래 segment 내 단어 순서를 우선 사용
+        if (
+            "segment_word_index"
+            in group.columns
+        ):
 
             return (
                 group
@@ -304,7 +328,9 @@ class IEUMDataset(Dataset):
                         self.segment_start_column,
                     ]
                 )
-                .reset_index(drop=True)
+                .reset_index(
+                    drop=True
+                )
             )
 
         return (
@@ -315,7 +341,9 @@ class IEUMDataset(Dataset):
                     self.segment_end_column,
                 ]
             )
-            .reset_index(drop=True)
+            .reset_index(
+                drop=True
+            )
         )
 
     def _split_segment_into_chunks(
@@ -323,26 +351,36 @@ class IEUMDataset(Dataset):
         group: pd.DataFrame,
     ) -> list[pd.DataFrame]:
         """
-        word start_sec를 기준으로 30초 window 안에
-        들어가는 단어들을 같은 chunk에 넣는다.
+        각 word의 start_sec를 기준으로
+        최대 30초 범위 내의 단어들을 하나의 chunk로 묶는다.
 
-        비정상적으로 긴 word end_sec는 chunk 구분 기준으로
-        사용하지 않는다.
+        abnormal_duration=True인 단어의 긴 end_sec는
+        chunk 분할 기준으로 사용하지 않는다.
         """
 
         group = self._sort_words(
             group
         )
 
-        chunks: list[pd.DataFrame] = []
+        chunks: list[
+            pd.DataFrame
+        ] = []
 
-        current_indices: list[int] = []
+        current_indices: list[
+            int
+        ] = []
+
         chunk_start: float | None = None
 
-        for row_index, row in group.iterrows():
+        for (
+            row_index,
+            row,
+        ) in group.iterrows():
 
             word_start = float(
-                row[self.segment_start_column]
+                row[
+                    self.segment_start_column
+                ]
             )
 
             if not current_indices:
@@ -357,10 +395,13 @@ class IEUMDataset(Dataset):
 
                 continue
 
-            assert chunk_start is not None
+            assert (
+                chunk_start
+                is not None
+            )
 
-            # 현재 단어의 시작 시점이 현재 chunk 시작에서
-            # 30초 이상 떨어져 있으면 새로운 chunk 시작
+            # 현재 chunk 시작 후 30초 이상 지난 단어면
+            # 새로운 chunk로 분리
             if (
                 word_start
                 - chunk_start
@@ -400,12 +441,16 @@ class IEUMDataset(Dataset):
     def _calculate_chunk_times(
         self,
         chunk: pd.DataFrame,
-    ) -> tuple[float, float]:
+    ) -> tuple[
+        float,
+        float,
+    ]:
         """
-        실제 WAV에서 읽을 chunk 시작/종료 시간을 계산한다.
+        실제 WAV에서 읽을 chunk 시작/종료 시점을 계산한다.
 
-        abnormal_duration=True인 단어는 지나치게 긴 end_sec가
-        chunk 길이를 비정상적으로 늘리지 않도록 30초에서 자른다.
+        정상 alignment의 end_sec를 우선 사용하고,
+        abnormal_duration=True인 단어가 지나치게 긴 end를
+        가진 경우 최대 30초에서 제한한다.
         """
 
         chunk_start = float(
@@ -425,8 +470,6 @@ class IEUMDataset(Dataset):
             ]
         ]
 
-        # 정상 alignment 단어가 있으면
-        # 정상 단어의 가장 마지막 end를 기본 종료점으로 사용
         if not normal_rows.empty:
 
             chunk_end = float(
@@ -437,16 +480,15 @@ class IEUMDataset(Dataset):
 
         else:
 
-            # 전부 abnormal이면 raw end를 사용하되
-            # 반드시 30초 이내로 제한
+            # 모든 단어가 abnormal인 예외적인 경우
             chunk_end = float(
                 chunk[
                     self.segment_end_column
                 ].max()
             )
 
-        # abnormal 단어도 audio 범위에 포함되도록
-        # 최소한 마지막 word start까지 포함
+        # abnormal 단어라도 해당 단어의 시작점까지는
+        # 실제 음성에 포함되도록 한다.
         latest_word_start = float(
             chunk[
                 self.segment_start_column
@@ -458,19 +500,19 @@ class IEUMDataset(Dataset):
             latest_word_start,
         )
 
-        # raw abnormal end가 30초 이상이어도
-        # Whisper 최대 길이를 절대 넘기지 않는다.
+        # Whisper 입력 길이 제한
         chunk_end = min(
             chunk_end,
             max_allowed_end,
         )
 
-        # 극단적으로 end == start인 경우 최소 길이 확보
+        # 0 이하 길이가 나오지 않도록 아주 최소한의
+        # 양수 길이만 보장한다.
         if chunk_end <= chunk_start:
 
-            chunk_end = min(
-                chunk_start + 0.02,
-                max_allowed_end,
+            chunk_end = (
+                chunk_start
+                + 0.02
             )
 
         return (
@@ -524,7 +566,8 @@ class IEUMDataset(Dataset):
             )
 
             original_sample_id = (
-                f"{audio_filename}::{segment_id}"
+                f"{audio_filename}"
+                f"::{segment_id}"
             )
 
             speaker_id = str(
@@ -586,9 +629,14 @@ class IEUMDataset(Dataset):
             for (
                 chunk_index,
                 chunk,
-            ) in enumerate(chunks):
+            ) in enumerate(
+                chunks
+            ):
 
-                chunk_start, chunk_end = (
+                (
+                    chunk_start,
+                    chunk_end,
+                ) = (
                     self._calculate_chunk_times(
                         chunk
                     )
@@ -632,7 +680,9 @@ class IEUMDataset(Dataset):
                     )
 
                 chunk_transcript = (
-                    " ".join(words)
+                    " ".join(
+                        words
+                    )
                 )
 
                 if len(chunks) == 1:
@@ -665,11 +715,11 @@ class IEUMDataset(Dataset):
                         "segment_id": (
                             segment_id
                         ),
-                        "chunk_index": (
-                            int(chunk_index)
+                        "chunk_index": int(
+                            chunk_index
                         ),
-                        "chunk_count": (
-                            int(len(chunks))
+                        "chunk_count": int(
+                            len(chunks)
                         ),
                         "segment_start_sec": (
                             chunk_start
@@ -692,15 +742,13 @@ class IEUMDataset(Dataset):
                         "split": (
                             split_value
                         ),
-                        "source_row_count": (
-                            int(len(chunk))
+                        "source_row_count": int(
+                            len(chunk)
                         ),
-                        "abnormal_word_count": (
-                            int(
-                                chunk[
-                                    self.abnormal_duration_column
-                                ].sum()
-                            )
+                        "abnormal_word_count": int(
+                            chunk[
+                                self.abnormal_duration_column
+                            ].sum()
                         ),
                     }
                 )
@@ -713,6 +761,56 @@ class IEUMDataset(Dataset):
             raise ValueError(
                 "학습 샘플이 생성되지 않았습니다."
             )
+
+        # ========================================================
+        # 최종 최소 길이 필터
+        #
+        # chunking을 모두 수행한 뒤,
+        # 실제 학습 단위가 0.1초 미만인 경우만 제거한다.
+        # ========================================================
+
+        before_min_filter_count = int(
+            len(samples)
+        )
+
+        too_short_mask = (
+            samples[
+                "duration_seconds"
+            ]
+            < self.min_chunk_seconds
+        )
+
+        removed_too_short_count = int(
+            too_short_mask.sum()
+        )
+
+        removed_too_short_split_counts = (
+            samples.loc[
+                too_short_mask,
+                "split",
+            ]
+            .value_counts()
+            .to_dict()
+        )
+
+        samples = (
+            samples.loc[
+                ~too_short_mask
+            ]
+            .reset_index(
+                drop=True
+            )
+        )
+
+        if samples.empty:
+            raise ValueError(
+                "최소 길이 필터 적용 후 "
+                "학습 가능한 chunk가 없습니다."
+            )
+
+        # ========================================================
+        # 중복 확인
+        # ========================================================
 
         duplicate_count = int(
             samples[
@@ -736,21 +834,60 @@ class IEUMDataset(Dataset):
             .to_dict()
         )
 
+        final_speaker_counts = (
+            samples.groupby(
+                "split"
+            )[
+                "speaker_id"
+            ]
+            .nunique()
+            .to_dict()
+        )
+
+        final_file_counts = (
+            samples.groupby(
+                "split"
+            )[
+                "audio_filename"
+            ]
+            .nunique()
+            .to_dict()
+        )
+
+        final_original_segment_counts = (
+            samples.groupby(
+                "split"
+            )[
+                "original_sample_id"
+            ]
+            .nunique()
+            .to_dict()
+        )
+
         chunk_summary = {
-            "original_segment_count": (
+            "original_segment_count": int(
                 original_segment_count
             ),
-            "final_chunk_count": (
+            "chunks_before_min_length_filter": (
+                before_min_filter_count
+            ),
+            "removed_too_short_count": (
+                removed_too_short_count
+            ),
+            "removed_too_short_split_counts": (
+                removed_too_short_split_counts
+            ),
+            "final_chunk_count": int(
                 len(samples)
             ),
-            "extra_chunks_created": (
-                len(samples)
+            "extra_chunks_created_before_filter": int(
+                before_min_filter_count
                 - original_segment_count
             ),
-            "chunked_original_segment_count": (
+            "chunked_original_segment_count": int(
                 chunked_original_count
             ),
-            "abnormal_word_count": (
+            "abnormal_word_count": int(
                 abnormal_word_count
             ),
             "original_split_counts": (
@@ -758,6 +895,15 @@ class IEUMDataset(Dataset):
             ),
             "final_chunk_split_counts": (
                 final_split_counts
+            ),
+            "final_original_segment_counts": (
+                final_original_segment_counts
+            ),
+            "final_speaker_counts": (
+                final_speaker_counts
+            ),
+            "final_file_counts": (
+                final_file_counts
             ),
         }
 
@@ -767,12 +913,15 @@ class IEUMDataset(Dataset):
         )
 
     # ============================================================
-    # Audio 경로
+    # Audio Path
     # ============================================================
 
     def _create_audio_index(
         self,
-    ) -> dict[str, Path]:
+    ) -> dict[
+        str,
+        Path,
+    ]:
 
         if not self.audio_root.exists():
 
@@ -797,7 +946,9 @@ class IEUMDataset(Dataset):
             )
         ):
 
-            filename = path.name
+            filename = (
+                path.name
+            )
 
             if filename in audio_index:
 
@@ -821,7 +972,9 @@ class IEUMDataset(Dataset):
         if duplicates:
 
             duplicate_name = next(
-                iter(duplicates)
+                iter(
+                    duplicates
+                )
             )
 
             raise ValueError(
@@ -844,7 +997,6 @@ class IEUMDataset(Dataset):
             )
 
             if stored_path.exists():
-
                 return stored_path
 
         direct_path = (
@@ -853,7 +1005,6 @@ class IEUMDataset(Dataset):
         )
 
         if direct_path.exists():
-
             return direct_path
 
         if self.audio_index is None:
@@ -869,7 +1020,6 @@ class IEUMDataset(Dataset):
         )
 
         if indexed_path is not None:
-
             return indexed_path
 
         raise FileNotFoundError(
@@ -889,7 +1039,9 @@ class IEUMDataset(Dataset):
     ) -> Tensor:
 
         with sf.SoundFile(
-            str(audio_path)
+            str(
+                audio_path
+            )
         ) as audio_file:
 
             original_sample_rate = (
@@ -897,7 +1049,9 @@ class IEUMDataset(Dataset):
             )
 
             total_frames = (
-                len(audio_file)
+                len(
+                    audio_file
+                )
             )
 
             start_frame = int(
@@ -927,7 +1081,10 @@ class IEUMDataset(Dataset):
                     f"{start_sec} ~ {end_sec}"
                 )
 
-            if start_frame >= total_frames:
+            if (
+                start_frame
+                >= total_frames
+            ):
 
                 raise ValueError(
                     "음성 시작 위치가 WAV 길이를 초과합니다.\n"
@@ -936,7 +1093,8 @@ class IEUMDataset(Dataset):
 
             num_frames = min(
                 num_frames,
-                total_frames - start_frame,
+                total_frames
+                - start_frame,
             )
 
             audio_file.seek(
@@ -945,8 +1103,12 @@ class IEUMDataset(Dataset):
 
             waveform_np = (
                 audio_file.read(
-                    frames=num_frames,
-                    dtype="float32",
+                    frames=(
+                        num_frames
+                    ),
+                    dtype=(
+                        "float32"
+                    ),
                     always_2d=True,
                 )
             )
@@ -958,19 +1120,16 @@ class IEUMDataset(Dataset):
                 f"{audio_path}"
             )
 
-        waveform = (
-            torch.from_numpy(
-                waveform_np.T
-            )
+        waveform = torch.from_numpy(
+            waveform_np.T
         )
 
+        # Stereo -> Mono
         if waveform.shape[0] > 1:
 
-            waveform = (
-                waveform.mean(
-                    dim=0,
-                    keepdim=True,
-                )
+            waveform = waveform.mean(
+                dim=0,
+                keepdim=True,
             )
 
         if (
@@ -990,17 +1149,28 @@ class IEUMDataset(Dataset):
                 )
             )
 
-        return (
+        waveform = (
             waveform
             .squeeze(0)
             .contiguous()
         )
 
+        if waveform.numel() == 0:
+
+            raise ValueError(
+                "전처리 후 waveform이 비어 있습니다.\n"
+                f"{audio_path}"
+            )
+
+        return waveform
+
     # ============================================================
-    # PyTorch Dataset
+    # Dataset
     # ============================================================
 
-    def __len__(self) -> int:
+    def __len__(
+        self,
+    ) -> int:
 
         return len(
             self.samples
@@ -1009,7 +1179,10 @@ class IEUMDataset(Dataset):
     def __getitem__(
         self,
         index: int,
-    ) -> dict[str, Any]:
+    ) -> dict[
+        str,
+        Any,
+    ]:
 
         row = (
             self.samples.iloc[
@@ -1041,40 +1214,30 @@ class IEUMDataset(Dataset):
                     "segment_id"
                 ]
             ),
-            "chunk_index": (
-                int(
-                    row[
-                        "chunk_index"
-                    ]
-                )
+            "chunk_index": int(
+                row[
+                    "chunk_index"
+                ]
             ),
-            "chunk_count": (
-                int(
-                    row[
-                        "chunk_count"
-                    ]
-                )
+            "chunk_count": int(
+                row[
+                    "chunk_count"
+                ]
             ),
-            "segment_start_sec": (
-                float(
-                    row[
-                        "segment_start_sec"
-                    ]
-                )
+            "segment_start_sec": float(
+                row[
+                    "segment_start_sec"
+                ]
             ),
-            "segment_end_sec": (
-                float(
-                    row[
-                        "segment_end_sec"
-                    ]
-                )
+            "segment_end_sec": float(
+                row[
+                    "segment_end_sec"
+                ]
             ),
-            "duration_seconds": (
-                float(
-                    row[
-                        "duration_seconds"
-                    ]
-                )
+            "duration_seconds": float(
+                row[
+                    "duration_seconds"
+                ]
             ),
             "transcript": (
                 row[
@@ -1139,15 +1302,15 @@ class IEUMDataset(Dataset):
         sample.update(
             {
                 "audio_path": (
-                    str(audio_path)
+                    str(
+                        audio_path
+                    )
                 ),
                 "waveform": (
                     waveform
                 ),
-                "num_samples": (
-                    int(
-                        waveform.numel()
-                    )
+                "num_samples": int(
+                    waveform.numel()
                 ),
                 "sample_rate": (
                     self.sample_rate
@@ -1175,7 +1338,10 @@ class IEUMDataset(Dataset):
 
     def summary(
         self,
-    ) -> dict[str, Any]:
+    ) -> dict[
+        str,
+        Any,
+    ]:
 
         duration = (
             self.samples[
@@ -1185,17 +1351,21 @@ class IEUMDataset(Dataset):
 
         return {
             "csv_path": (
-                str(self.csv_path)
+                str(
+                    self.csv_path
+                )
             ),
             "audio_root": (
-                str(self.audio_root)
+                str(
+                    self.audio_root
+                )
             ),
             "requested_split": (
                 self.requested_split
             ),
-            "sample_count": (
-                int(
-                    len(self.samples)
+            "sample_count": int(
+                len(
+                    self.samples
                 )
             ),
             "original_segment_count": (
@@ -1203,12 +1373,10 @@ class IEUMDataset(Dataset):
                     "original_segment_count"
                 ]
             ),
-            "speaker_count": (
-                int(
-                    self.samples[
-                        "speaker_id"
-                    ].nunique()
-                )
+            "speaker_count": int(
+                self.samples[
+                    "speaker_id"
+                ].nunique()
             ),
             "split_counts": (
                 self.samples[
@@ -1217,28 +1385,26 @@ class IEUMDataset(Dataset):
                 .value_counts()
                 .to_dict()
             ),
-            "duration_min": (
-                float(
-                    duration.min()
-                )
+            "duration_min": float(
+                duration.min()
             ),
-            "duration_mean": (
-                float(
-                    duration.mean()
-                )
+            "duration_mean": float(
+                duration.mean()
             ),
-            "duration_median": (
-                float(
-                    duration.median()
-                )
+            "duration_median": float(
+                duration.median()
             ),
-            "duration_max": (
-                float(
-                    duration.max()
-                )
+            "duration_max": float(
+                duration.max()
             ),
             "sample_rate": (
                 self.sample_rate
+            ),
+            "min_chunk_seconds": (
+                self.min_chunk_seconds
+            ),
+            "max_audio_seconds": (
+                self.max_audio_seconds
             ),
             "chunk_summary": (
                 self.chunk_summary
