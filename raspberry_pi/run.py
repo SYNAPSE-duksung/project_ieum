@@ -4,7 +4,7 @@ from record_audio import record_audio
 
 SERVER_URL = "http://127.0.0.1:8000"
 AUDIO_PATH = "recorded_audio.wav"
-RECORD_DURATION = 5.0
+RECORD_DURATION = 30.0
 
 
 def main():
