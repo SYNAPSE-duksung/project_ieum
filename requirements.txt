@@ -11,3 +11,4 @@ uvicorn
 python-multipart
 requests
 sounddevice
+numpy

@@ -30,3 +30,6 @@ Thumbs.db
 
 # Raspberry Pi temporary audio
 recorded_audio.wav
+
+# Final trained model
+models/final/*.pt
