@@ -2,7 +2,7 @@ from api_client import ASRApiClient
 from record_audio import record_audio
 
 
-SERVER_URL = "http://127.0.0.1:8000"
+SERVER_URL = "http://192.168.137.1:8000"
 AUDIO_PATH = "recorded_audio.wav"
 RECORD_DURATION = 30.0
 
