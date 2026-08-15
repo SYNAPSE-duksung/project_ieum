@@ -70,3 +70,34 @@ Thumbs.db
 
 *.tmp
 *.bak
+# ==========================
+# AI Model Files
+# ==========================
+
+models/final/best_model.pt
+piper/*.onnx
+piper/*.onnx.json
+
+
+# ==========================
+# Generated Audio Files
+# ==========================
+
+*.wav
+*.m4a
+*.mp3
+*.flac
+
+
+# ==========================
+# Generated Output
+# ==========================
+
+outputs/
+
+
+# ==========================
+# IDE
+# ==========================
+
+.idea/
