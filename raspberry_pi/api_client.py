@@ -6,9 +6,12 @@ import requests
 
 class ASRApiClient:
     """
-    Raspberry Pi에서 IEUM FastAPI 서버로
-    음성 파일을 전송하고,
-    TTS 음성을 요청하는 클라이언트
+    Raspberry Pi에서 IEUM FastAPI 서버와 통신하는 클라이언트.
+
+    현재 지원:
+    1. FastAPI 서버 상태 확인
+    2. 음성 파일 → ASR → 텍스트
+    3. 텍스트 → TTS → WAV 파일
     """
 
     def __init__(
@@ -25,7 +28,7 @@ class ASRApiClient:
 
     def health_check(self) -> bool:
         """
-        FastAPI 서버 상태 확인
+        FastAPI 서버 상태 확인.
         """
 
         try:
@@ -49,7 +52,7 @@ class ASRApiClient:
     ) -> Optional[str]:
         """
         WAV 파일을 FastAPI 서버로 전송하고
-        음성 인식 결과를 반환
+        음성 인식 결과를 반환한다.
         """
 
         path = Path(audio_path)
@@ -60,6 +63,7 @@ class ASRApiClient:
             )
 
         with path.open("rb") as audio_file:
+
             files = {
                 "audio": (
                     path.name,
@@ -78,7 +82,9 @@ class ASRApiClient:
                 response.raise_for_status()
 
             except requests.RequestException as error:
-                print(f"[ERROR] ASR API request failed: {error}")
+                print(
+                    f"[ERROR] ASR API request failed: {error}"
+                )
                 return None
 
         result = response.json()
@@ -101,14 +107,15 @@ class ASRApiClient:
         Parameters
         ----------
         text:
-            음성으로 변환할 텍스트
+            음성으로 변환할 한국어 텍스트
 
         output_path:
             생성된 WAV 파일을 저장할 경로
 
         Returns
         -------
-        저장된 WAV 파일 경로
+        Optional[str]
+            저장된 WAV 파일 경로
         """
 
         if not text or not text.strip():
@@ -116,7 +123,7 @@ class ASRApiClient:
                 "TTS text is empty."
             )
 
-        path = Path(output_path)
+        output = Path(output_path)
 
         try:
             response = requests.post(
@@ -130,55 +137,88 @@ class ASRApiClient:
             response.raise_for_status()
 
         except requests.RequestException as error:
-            print(f"[ERROR] TTS API request failed: {error}")
+            print(
+                f"[ERROR] TTS API request failed: {error}"
+            )
             return None
 
-        path.write_bytes(response.content)
+        try:
+            output.write_bytes(
+                response.content
+            )
 
-        return str(path)
+        except OSError as error:
+            print(
+                f"[ERROR] Failed to save TTS WAV: {error}"
+            )
+            return None
 
+        if not output.exists():
+            print(
+                "[ERROR] TTS WAV file was not created."
+            )
+            return None
 
-# ============================================================
-# Test
-# ============================================================
+        return str(output)
+
+    # ========================================================
+    # Test
+    # ========================================================
+
+    def test_tts(
+        self,
+        text: str = "안녕하세요. 이음 보조장치입니다.",
+        output_path: str = "raspberry_pi_tts.wav",
+    ) -> None:
+        """
+        TTS API 연결 테스트.
+        """
+
+        print("=" * 60)
+        print("IEUM Raspberry Pi TTS API Test")
+        print("=" * 60)
+
+        print()
+        print("[1] FastAPI 서버 확인")
+
+        if not self.health_check():
+            print(
+                "[ERROR] FastAPI server is not available."
+            )
+            return
+
+        print(
+            "FastAPI server is running."
+        )
+
+        print()
+        print("[2] TTS 요청")
+
+        print(f"입력 텍스트: {text}")
+
+        wav_path = self.synthesize(
+            text=text,
+            output_path=output_path,
+        )
+
+        if wav_path is None:
+            print(
+                "[ERROR] TTS 음성 생성에 실패했습니다."
+            )
+            return
+
+        print()
+        print("TTS 파일 생성 완료:")
+        print(f"  {wav_path}")
+
+        print()
+        print("=" * 60)
+        print("TTS API Test 완료")
+        print("=" * 60)
+
 
 if __name__ == "__main__":
 
-    client = ASRApiClient(
-        server_url="http://127.0.0.1:8000"
-    )
+    client = ASRApiClient()
 
-    print("=" * 60)
-    print("IEUM API Client 테스트")
-    print("=" * 60)
-
-    # --------------------------------------------------------
-    # 1. 서버 상태 확인
-    # --------------------------------------------------------
-
-    if client.health_check():
-        print("FastAPI server is running.")
-    else:
-        print("FastAPI server is not available.")
-        exit(1)
-
-    # --------------------------------------------------------
-    # 2. TTS 테스트
-    # --------------------------------------------------------
-
-    text = "안녕하세요. IEUM Piper TTS 테스트입니다."
-
-    print()
-    print(f"입력 텍스트: {text}")
-
-    output = client.synthesize(
-        text=text,
-        output_path="tts_client_test.wav",
-    )
-
-    if output:
-        print(f"TTS 파일 생성 완료: {output}")
-    else:
-        print("TTS 파일 생성 실패.")
-
-    print("=" * 60)
+    client.test_tts()
