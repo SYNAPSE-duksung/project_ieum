@@ -8,12 +8,13 @@ import torch
 from src.asr.encoder import WhisperEncoder
 from src.asr.models import BiGRUCTC
 from src.asr.trainer import CTCASRModel
+from src.asr.tokenizer import CTCCharacterTokenizer
 
 
 def load_general_model(
     checkpoint_path: str | Path,
+    vocab_path: str | Path,
     *,
-    vocab_size: int,
     device: torch.device,
     model_name: str = "openai/whisper-small",
     encoder_train_mode: str = "freeze",
@@ -21,7 +22,7 @@ def load_general_model(
     num_layers: int = 2,
     dropout: float = 0.1,
     sample_rate: int = 16000,
-) -> tuple[CTCASRModel, dict[str, Any]]:
+) -> tuple[CTCASRModel, CTCCharacterTokenizer, dict[str, Any]]:
     """
     학습된 범용 IEUM ASR 모델을 개인화 학습의
     초기 모델로 불러온다.
@@ -38,8 +39,8 @@ def load_general_model(
     checkpoint_path:
         범용 모델의 best_model.pt 경로.
 
-    vocab_size:
-        범용 모델 학습 당시 사용한 vocabulary 크기.
+    vocab_path:
+        범용 모델 학습 당시 저장한 vocab.json 경로.
 
     encoder_train_mode:
         개인화 학습에서 Whisper Encoder의
@@ -52,11 +53,27 @@ def load_general_model(
         checkpoint_path
     )
 
+    vocab_path = Path(
+        vocab_path
+    )
+
     if not checkpoint_path.exists():
         raise FileNotFoundError(
             "범용 모델 checkpoint를 찾을 수 없습니다.\n"
             f"경로: {checkpoint_path}"
         )
+
+    if not vocab_path.exists():
+        raise FileNotFoundError(
+            "범용 모델 vocabulary를 찾을 수 없습니다.\n"
+            f"경로: {vocab_path}"
+        )
+
+    tokenizer = CTCCharacterTokenizer.load(
+        vocab_path
+    )
+
+    vocab_size = tokenizer.vocab_size
 
     # ========================================================
     # Whisper Encoder
@@ -112,4 +129,4 @@ def load_general_model(
         device
     )
 
-    return model, checkpoint
+    return model, tokenizer, checkpoint
