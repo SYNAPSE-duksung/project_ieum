@@ -401,6 +401,7 @@ def prepare_error_profile(
     tokenizer: CTCCharacterTokenizer,
     device: torch.device,
     original_vocab_size: int,
+    supported_reference_syllables: set[str],
     batch_size: int,
     num_workers: int,
     min_count: int,
@@ -565,7 +566,10 @@ def prepare_error_profile(
 
     raw_profile = (
         build_raw_error_profile(
-            reference_prediction_pairs
+            reference_prediction_pairs, 
+            supported_reference_syllables=(
+                supported_reference_syllables
+            ),
         )
     )
 
@@ -1081,6 +1085,15 @@ def main() -> None:
         original_vocab
     )
 
+    # Error Profile에서 분석할 수 있는
+    # 기존 범용 vocab의 한글 음절만 추출
+    supported_reference_syllables = {
+        token
+        for token in original_vocab
+        if len(token) == 1
+        and "\uAC00" <= token <= "\uD7A3"
+    }
+
     print()
     print(
         f"Original vocab size for "
@@ -1269,6 +1282,9 @@ def main() -> None:
             device=device,
             original_vocab_size=(
                 original_vocab_size
+            ),
+            supported_reference_syllables=(
+                supported_reference_syllables
             ),
             batch_size=args.batch_size,
             num_workers=args.num_workers,
