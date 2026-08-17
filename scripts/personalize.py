@@ -238,14 +238,27 @@ def predict_train_dataset(
     data_loader: DataLoader,
     tokenizer: CTCCharacterTokenizer,
     device: torch.device,
+    original_vocab_size: int,
 ) -> list[dict[str, Any]]:
     """
     개인화 Fine-tuning 전에 현재 범용 모델로
     화자의 train 데이터 prediction을 생성한다.
 
-    이 prediction은 Error Profile 생성과
-    sample weight 계산에만 사용한다.
+    중요
+    ----
+    개인화 모델 자체는 extended vocab 크기로 생성되어 있지만,
+    Error Profile은 '개인화 전 범용 모델의 오류'를 분석하는 것이므로
+    prediction에서는 기존 범용 vocab 범위의 logits만 사용한다.
+
+    즉:
+        Error Profile prediction → original vocab
+        Personalization training → extended vocab
     """
+
+    if original_vocab_size <= 0:
+        raise ValueError(
+            "original_vocab_size는 1 이상이어야 합니다."
+        )
 
     model.eval()
 
@@ -267,19 +280,49 @@ def predict_train_dataset(
             non_blocking=True,
         )
 
-        outputs = model(
-            input_features,
-            audio_num_samples,
+        # ----------------------------------------------------
+        # CTCASRModel.forward()
+        #
+        # 반환:
+        #   logits, input_lengths
+        # ----------------------------------------------------
+
+        logits, input_lengths = model(
+            input_features=input_features,
+            audio_num_samples=audio_num_samples,
         )
 
-        # 혹시 모델이 dict를 반환하는 경우도 처리
-        if isinstance(outputs, dict):
-            logits = outputs["logits"]
-        else:
-            logits = outputs
+        if logits.ndim != 3:
+            raise RuntimeError(
+                "예상하지 못한 logits shape입니다.\n"
+                f"logits.shape = {tuple(logits.shape)}"
+            )
+
+        if logits.shape[-1] < original_vocab_size:
+            raise RuntimeError(
+                "모델 classifier 크기가 기존 vocab보다 작습니다.\n"
+                f"classifier size   : {logits.shape[-1]}\n"
+                f"original vocab   : {original_vocab_size}"
+            )
+
+        # ----------------------------------------------------
+        # Error Profile 생성에서는 기존 범용 vocab만 사용
+        #
+        # 개인화 모델:
+        #   0 ~ 823     : 범용 모델에서 학습된 weight
+        #   824 ~ 1094 : 새로 초기화된 weight
+        #
+        # 새 classifier row는 아직 학습되지 않았으므로
+        # 범용 모델 Error Profile prediction에는 포함하지 않는다.
+        # ----------------------------------------------------
+
+        general_logits = logits[
+            ...,
+            :original_vocab_size,
+        ]
 
         predicted_ids = torch.argmax(
-            logits,
+            general_logits,
             dim=-1,
         )
 
@@ -287,16 +330,49 @@ def predict_train_dataset(
             "references"
         ]
 
-        for reference, token_ids in zip(
-            references,
-            predicted_ids,
+        if len(references) != predicted_ids.shape[0]:
+            raise RuntimeError(
+                "Reference 수와 prediction batch 크기가 다릅니다."
+            )
+
+        # ----------------------------------------------------
+        # CTC decode
+        #
+        # padding 영역까지 decode하지 않고
+        # 실제 encoder output length까지만 사용한다.
+        # ----------------------------------------------------
+
+        for index, reference in enumerate(
+            references
         ):
 
-            prediction = tokenizer.decode(
-                token_ids
+            length = int(
+                input_lengths[
+                    index
+                ].item()
+            )
+
+            length = max(
+                1,
+                min(
+                    length,
+                    predicted_ids.shape[1],
+                ),
+            )
+
+            token_ids = (
+                predicted_ids[
+                    index,
+                    :length,
+                ]
                 .detach()
                 .cpu()
                 .tolist()
+            )
+
+            prediction = tokenizer.decode(
+                token_ids,
+                ctc_decode=True,
             )
 
             results.append(
@@ -324,6 +400,7 @@ def prepare_error_profile(
     feature_extractor: IEUMWhisperFeatureExtractor,
     tokenizer: CTCCharacterTokenizer,
     device: torch.device,
+    original_vocab_size: int,
     batch_size: int,
     num_workers: int,
     min_count: int,
@@ -410,6 +487,9 @@ def prepare_error_profile(
             data_loader=prediction_loader,
             tokenizer=tokenizer,
             device=device,
+            original_vocab_size=(
+                original_vocab_size
+            ),
         )
     )
 
@@ -982,6 +1062,33 @@ def main() -> None:
     )
 
     # ========================================================
+    # Original vocab size
+    #
+    # Error Profile 생성에서는 범용 모델이 실제로
+    # 학습했던 기존 vocab 범위만 사용한다.
+    # ========================================================
+
+    with vocab_path.open(
+        "r",
+        encoding="utf-8",
+    ) as file:
+
+        original_vocab = json.load(
+            file
+        )
+
+    original_vocab_size = len(
+        original_vocab
+    )
+
+    print()
+    print(
+        f"Original vocab size for "
+        f"Error Profile: "
+        f"{original_vocab_size}"
+    )
+
+    # ========================================================
     # General → Personalization model
     # ========================================================
 
@@ -1160,6 +1267,9 @@ def main() -> None:
             ),
             tokenizer=tokenizer,
             device=device,
+            original_vocab_size=(
+                original_vocab_size
+            ),
             batch_size=args.batch_size,
             num_workers=args.num_workers,
             min_count=args.min_count,
