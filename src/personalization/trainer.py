@@ -91,7 +91,7 @@ class PersonalizationTrainer(
         # reduction="none" 사용
         # ====================================================
 
-        self.ctc_loss = nn.CTCLoss(
+        self.sample_ctc_loss = nn.CTCLoss(
             blank=tokenizer.blank_id,
             reduction="none",
             zero_infinity=True,
@@ -141,7 +141,11 @@ class PersonalizationTrainer(
         target_lengths: Tensor,
     ) -> Tensor:
         """
-        각 sample의 CTC loss를 계산한다.
+        각 sample의 길이 정규화된 CTC loss를 계산한다.
+
+        기존 CTCTrainer의
+        CTCLoss(reduction="mean")과 동일하게
+        각 sample loss를 target length로 정규화한다.
 
         Returns
         -------
@@ -160,14 +164,26 @@ class PersonalizationTrainer(
             1,
         )
 
-        losses = self.ctc_loss(
+        losses = self.sample_ctc_loss(
             log_probs,
             targets,
             input_lengths,
             target_lengths,
         )
 
-        return losses
+        # 기존 CTCLoss(reduction="mean")의
+        # sample별 길이 정규화 방식 유지
+        
+        normalized_losses = (
+            losses
+            / target_lengths
+            .to(
+                losses.dtype
+            )
+            .clamp_min(1)
+        )
+
+        return normalized_losses
 
     # ========================================================
     # Loss
@@ -238,6 +254,16 @@ class PersonalizationTrainer(
                 f"{sample_weights.shape[0]}\n"
                 f"sample_losses: "
                 f"{sample_losses.shape[0]}"
+            )
+
+        if not torch.all(
+            torch.isfinite(
+                sample_weights
+            )
+        ):
+            raise ValueError(
+                "sample_weights에 "
+                "NaN 또는 Inf가 포함되어 있습니다."
             )
 
         if torch.any(
