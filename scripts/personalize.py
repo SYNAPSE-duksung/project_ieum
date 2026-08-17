@@ -57,6 +57,7 @@ from src.personalization.trainer import (
 
 from src.personalization.error_profile import (
     build_raw_error_profile,
+    analyze_vocab_unsupported_errors,
     filter_error_profile,
 )
 
@@ -555,6 +556,77 @@ def prepare_error_profile(
         )
         for row in prediction_rows
     ]
+
+    # --------------------------------------------------------
+    # Vocabulary unsupported error analysis
+    # --------------------------------------------------------
+
+    print(
+        "Vocab 미지원 오류 분석 중..."
+    )
+
+    (
+        unsupported_error_rows,
+        vocab_coverage_summary,
+    ) = analyze_vocab_unsupported_errors(
+        reference_prediction_pairs,
+        supported_reference_syllables=(
+            supported_reference_syllables
+        ),
+    )
+
+    # 상세 오류 저장
+    pd.DataFrame(
+        unsupported_error_rows,
+        columns=[
+            "error_type",
+            "reference_syllable",
+            "predicted_syllable",
+            "count",
+
+        ],
+    ).to_csv(
+        output_dir
+        / "vocab_unsupported_errors.csv",
+        index=False,
+        encoding="utf-8-sig",
+    )
+
+    # 요약 통계 저장
+    with (
+        output_dir
+        / "vocab_coverage_summary.json"
+    ).open(
+        "w",
+        encoding="utf-8",
+    ) as file:
+
+        json.dump(
+            vocab_coverage_summary,
+            file,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    print(
+        f"전체 alignment 오류 : "
+        f"{vocab_coverage_summary['total_alignment_errors']}"
+    )
+
+    print(
+        f"분석 가능 오류       : "
+        f"{vocab_coverage_summary['speaker_analyzable_errors']}"
+    )
+
+    print(
+        f"Vocab 미지원 오류    : "
+        f"{vocab_coverage_summary['vocab_unsupported_errors']}"
+    )
+
+    print(
+        f"Vocab 미지원 오류율  : "
+        f"{vocab_coverage_summary['vocab_unsupported_error_rate']:.4%}"
+    )
 
     # --------------------------------------------------------
     # Raw Error Profile

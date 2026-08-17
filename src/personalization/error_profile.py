@@ -522,6 +522,156 @@ def build_raw_error_profile(
     return rows
 
 
+def analyze_vocab_unsupported_errors(
+    reference_prediction_pairs: Iterable[
+        tuple[str, str]
+    ],
+    *,
+    supported_reference_syllables: Collection[str],
+) -> tuple[list[dict], dict]:
+    """
+    전체 alignment 오류 중에서
+    범용 vocab이 지원하지 않는 reference 음절 때문에
+    Speaker Error Profile에서 제외되는 오류를 분석합니다.
+
+    반환
+    ----
+    unsupported_rows:
+        vocab 미지원 오류 유형별 상세 통계
+
+    summary:
+        전체 alignment 오류 수,
+        vocab 미지원 오류 수,
+        vocab 미지원 오류 비율 등을 포함한 요약
+    """
+
+    pairs = list(
+        reference_prediction_pairs
+    )
+
+    supported_set = {
+        str(syllable)
+        for syllable
+        in supported_reference_syllables
+        if is_korean_syllable(
+            str(syllable)
+        )
+    }
+
+    total_alignment_errors = 0
+    vocab_unsupported_errors = 0
+
+    unsupported_counter: Counter[
+        tuple[str, str, str]
+    ] = Counter()
+
+    for (
+        reference_text,
+        prediction_text,
+    ) in pairs:
+
+        errors = extract_syllable_errors(
+            reference_text,
+            prediction_text,
+        )
+
+        total_alignment_errors += len(
+            errors
+        )
+
+        for error in errors:
+
+            # insertion은 reference가 없으므로
+            # vocab 지원 여부를 판단하지 않는다.
+            if error.error_type == "insertion":
+                continue
+
+            if (
+                error.reference_syllable
+                not in supported_set
+            ):
+
+                vocab_unsupported_errors += 1
+
+                key = (
+                    error.error_type,
+                    error.reference_syllable,
+                    error.predicted_syllable,
+                )
+
+                unsupported_counter[
+                    key
+                ] += 1
+
+    unsupported_rows: list[
+        dict
+    ] = []
+
+    for (
+        error_type,
+        reference_syllable,
+        predicted_syllable,
+    ), count in unsupported_counter.items():
+
+        unsupported_rows.append(
+            {
+                "error_type": (
+                    error_type
+                ),
+                "reference_syllable": (
+                    reference_syllable
+                ),
+                "predicted_syllable": (
+                    predicted_syllable
+                ),
+                "count": (
+                    count
+                ),
+            }
+        )
+
+    unsupported_rows.sort(
+        key=lambda row: (
+            -row["count"],
+            row["error_type"],
+            row["reference_syllable"],
+            row["predicted_syllable"],
+        )
+    )
+
+    analyzable_errors = (
+        total_alignment_errors
+        - vocab_unsupported_errors
+    )
+
+    unsupported_rate = (
+        vocab_unsupported_errors
+        / total_alignment_errors
+        if total_alignment_errors > 0
+        else 0.0
+    )
+
+    summary = {
+        "total_alignment_errors": (
+            total_alignment_errors
+        ),
+        "speaker_analyzable_errors": (
+            analyzable_errors
+        ),
+        "vocab_unsupported_errors": (
+            vocab_unsupported_errors
+        ),
+        "vocab_unsupported_error_rate": (
+            unsupported_rate
+        ),
+    }
+
+    return (
+        unsupported_rows,
+        summary,
+    )
+
+
 def filter_error_profile(
     raw_profile: Sequence[
         dict
