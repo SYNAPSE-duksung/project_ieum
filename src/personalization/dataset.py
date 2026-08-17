@@ -73,3 +73,57 @@ class PersonalizationIEUMDataset(IEUMDataset):
             )
 
         return dataframe
+
+    def set_sample_weights(
+        self,
+        sample_weights: list[float],
+        ) -> None:
+        """
+        각 학습 chunk에 Error Profile 기반 sample weight를 저장한다.
+
+        sample_weights의 순서는 self.samples의 순서와
+        정확히 일치해야 한다.
+        """
+
+        if len(sample_weights) != len(self.samples):
+            raise ValueError(
+                "sample_weights 개수가 Dataset sample 수와 다릅니다.\n"
+                f"Dataset samples: {len(self.samples)}\n"
+                f"sample_weights: {len(sample_weights)}"
+            )
+
+        self.samples[
+            "sample_weight"
+        ] = [
+            float(weight)
+            for weight in sample_weights
+        ]
+
+    def __getitem__(
+        self,
+        index: int,
+    ):
+        """
+        기존 IEUMDataset sample을 그대로 사용하면서,
+        Error Profile weight가 존재하면 함께 반환한다.
+        """
+
+        sample = super().__getitem__(
+            index
+        )
+
+        if (
+            "sample_weight"
+            in self.samples.columns
+        ):
+            sample[
+                "sample_weight"
+            ] = float(
+                self.samples.iloc[
+                    index
+                ][
+                    "sample_weight"
+                ]
+            )
+
+        return sample

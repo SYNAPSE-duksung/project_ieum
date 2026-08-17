@@ -55,6 +55,15 @@ from src.personalization.trainer import (
     PersonalizationTrainer,
 )
 
+from src.personalization.error_profile import (
+    build_raw_error_profile,
+    filter_error_profile,
+)
+
+from src.personalization.weighting import (
+    calculate_sample_weights,
+)
+
 
 # ============================================================
 # Seed
@@ -64,22 +73,12 @@ def set_seed(
     seed: int,
 ) -> None:
 
-    random.seed(
-        seed
-    )
-
-    np.random.seed(
-        seed
-    )
-
-    torch.manual_seed(
-        seed
-    )
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
 
     if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(
-            seed
-        )
+        torch.cuda.manual_seed_all(seed)
 
 
 # ============================================================
@@ -92,9 +91,7 @@ def encode_targets(
 ) -> dict[str, torch.Tensor]:
 
     encoded_targets = [
-        tokenizer.encode(
-            text
-        )
+        tokenizer.encode(text)
         for text in references
     ]
 
@@ -134,6 +131,9 @@ class PersonalizationCollator:
     Whisper Log-Mel Feature
         ↓
     CTC target encoding
+
+    Error Profile mode에서는 sample_weight가 존재할 경우
+    batch["sample_weights"]로 함께 전달한다.
     """
 
     def __init__(
@@ -142,13 +142,8 @@ class PersonalizationCollator:
         tokenizer: CTCCharacterTokenizer,
     ) -> None:
 
-        self.feature_extractor = (
-            feature_extractor
-        )
-
-        self.tokenizer = (
-            tokenizer
-        )
+        self.feature_extractor = feature_extractor
+        self.tokenizer = tokenizer
 
     def __call__(
         self,
@@ -165,10 +160,8 @@ class PersonalizationCollator:
             for sample in samples
         ]
 
-        feature_batch = (
-            self.feature_extractor.batch(
-                waveforms
-            )
+        feature_batch = self.feature_extractor.batch(
+            waveforms
         )
 
         target_data = encode_targets(
@@ -178,49 +171,33 @@ class PersonalizationCollator:
 
         batch = {
             "input_features": (
-                feature_batch[
-                    "input_features"
-                ]
+                feature_batch["input_features"]
             ),
             "audio_num_samples": (
-                feature_batch[
-                    "audio_num_samples"
-                ]
+                feature_batch["audio_num_samples"]
             ),
             "targets": (
-                target_data[
-                    "targets"
-                ]
+                target_data["targets"]
             ),
             "target_lengths": (
-                target_data[
-                    "target_lengths"
-                ]
+                target_data["target_lengths"]
             ),
             "references": references,
         }
 
-        # ----------------------------------------------------
-        # Error Profile 단계에서 sample_weights가
-        # dataset에 추가되면 자동으로 batch에 포함
-        # ----------------------------------------------------
-
+        # Error Profile mode에서만 존재한다.
         if all(
             "sample_weight" in sample
             for sample in samples
         ):
-            batch["sample_weights"] = (
-                torch.tensor(
-                    [
-                        float(
-                            sample[
-                                "sample_weight"
-                            ]
-                        )
-                        for sample in samples
-                    ],
-                    dtype=torch.float32,
-                )
+            batch["sample_weights"] = torch.tensor(
+                [
+                    float(
+                        sample["sample_weight"]
+                    )
+                    for sample in samples
+                ],
+                dtype=torch.float32,
             )
 
         return batch
@@ -249,6 +226,466 @@ def create_dataset(
         max_audio_seconds=max_audio_seconds,
         load_audio=True,
     )
+
+
+# ============================================================
+# General model prediction
+# ============================================================
+
+@torch.no_grad()
+def predict_train_dataset(
+    model: torch.nn.Module,
+    data_loader: DataLoader,
+    tokenizer: CTCCharacterTokenizer,
+    device: torch.device,
+) -> list[dict[str, Any]]:
+    """
+    개인화 Fine-tuning 전에 현재 범용 모델로
+    화자의 train 데이터 prediction을 생성한다.
+
+    이 prediction은 Error Profile 생성과
+    sample weight 계산에만 사용한다.
+    """
+
+    model.eval()
+
+    results: list[dict[str, Any]] = []
+
+    for batch in data_loader:
+
+        input_features = batch[
+            "input_features"
+        ].to(
+            device,
+            non_blocking=True,
+        )
+
+        audio_num_samples = batch[
+            "audio_num_samples"
+        ].to(
+            device,
+            non_blocking=True,
+        )
+
+        outputs = model(
+            input_features,
+            audio_num_samples,
+        )
+
+        # 혹시 모델이 dict를 반환하는 경우도 처리
+        if isinstance(outputs, dict):
+            logits = outputs["logits"]
+        else:
+            logits = outputs
+
+        predicted_ids = torch.argmax(
+            logits,
+            dim=-1,
+        )
+
+        references = batch[
+            "references"
+        ]
+
+        for reference, token_ids in zip(
+            references,
+            predicted_ids,
+        ):
+
+            prediction = tokenizer.decode(
+                token_ids
+                .detach()
+                .cpu()
+                .tolist()
+            )
+
+            results.append(
+                {
+                    "reference_text": (
+                        reference
+                    ),
+                    "prediction_text": (
+                        prediction
+                    ),
+                }
+            )
+
+    return results
+
+
+# ============================================================
+# Error Profile preparation
+# ============================================================
+
+def prepare_error_profile(
+    *,
+    model: torch.nn.Module,
+    train_dataset: PersonalizationIEUMDataset,
+    feature_extractor: IEUMWhisperFeatureExtractor,
+    tokenizer: CTCCharacterTokenizer,
+    device: torch.device,
+    batch_size: int,
+    num_workers: int,
+    min_count: int,
+    min_ratio: float,
+    alpha: float,
+    max_weight: float | None,
+    output_dir: Path,
+) -> None:
+    """
+    train 데이터만 사용하여
+
+    1. 범용 모델 prediction 생성
+    2. Raw Error Profile 생성
+    3. threshold 적용
+    4. train sample별 weight 계산
+    5. Dataset에 weight 연결
+
+    을 수행한다.
+
+    valid/test 데이터는 Error Profile 생성에 사용하지 않는다.
+    """
+
+    print()
+    print("=" * 70)
+    print("Error Profile 생성")
+    print("=" * 70)
+
+    print(
+        f"min_count : {min_count}"
+    )
+
+    print(
+        f"min_ratio : {min_ratio}"
+    )
+
+    print(
+        f"alpha     : {alpha}"
+    )
+
+    print(
+        f"max_weight: {max_weight}"
+    )
+
+    # --------------------------------------------------------
+    # Prediction loader
+    #
+    # 반드시 shuffle=False.
+    # Dataset index와 prediction 순서를 유지해야
+    # weight를 정확한 sample에 연결할 수 있다.
+    # --------------------------------------------------------
+
+    prediction_collator = (
+        PersonalizationCollator(
+            feature_extractor=(
+                feature_extractor
+            ),
+            tokenizer=tokenizer,
+        )
+    )
+
+    prediction_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        collate_fn=prediction_collator,
+        pin_memory=(
+            device.type == "cuda"
+        ),
+    )
+
+    # --------------------------------------------------------
+    # General model prediction
+    # --------------------------------------------------------
+
+    print()
+    print(
+        "범용 모델로 train 데이터 추론 중..."
+    )
+
+    prediction_rows = (
+        predict_train_dataset(
+            model=model,
+            data_loader=prediction_loader,
+            tokenizer=tokenizer,
+            device=device,
+        )
+    )
+
+    if (
+        len(prediction_rows)
+        != len(train_dataset)
+    ):
+        raise RuntimeError(
+            "Train prediction 수와 "
+            "Dataset sample 수가 다릅니다.\n"
+            f"Predictions: {len(prediction_rows)}\n"
+            f"Dataset: {len(train_dataset)}"
+        )
+
+    sample_ids = (
+        train_dataset.samples[
+            "sample_id"
+        ]
+        .astype(str)
+        .tolist()
+    )
+
+    # --------------------------------------------------------
+    # Prediction 저장
+    # --------------------------------------------------------
+
+    prediction_save_rows = []
+
+    for sample_id, row in zip(
+        sample_ids,
+        prediction_rows,
+    ):
+        prediction_save_rows.append(
+            {
+                "sample_id": sample_id,
+                "reference_text": (
+                    row["reference_text"]
+                ),
+                "prediction_text": (
+                    row["prediction_text"]
+                ),
+            }
+        )
+
+    pd.DataFrame(
+        prediction_save_rows
+    ).to_csv(
+        output_dir
+        / "train_general_predictions.csv",
+        index=False,
+        encoding="utf-8-sig",
+    )
+
+    # --------------------------------------------------------
+    # Reference / Prediction pairs
+    # --------------------------------------------------------
+
+    reference_prediction_pairs = [
+        (
+            row["reference_text"],
+            row["prediction_text"],
+        )
+        for row in prediction_rows
+    ]
+
+    # --------------------------------------------------------
+    # Raw Error Profile
+    # --------------------------------------------------------
+
+    print(
+        "Raw Error Profile 생성 중..."
+    )
+
+    raw_profile = (
+        build_raw_error_profile(
+            reference_prediction_pairs
+        )
+    )
+
+    raw_profile_df = pd.DataFrame(
+        raw_profile
+    )
+
+    raw_profile_df.to_csv(
+        output_dir
+        / "raw_error_profile.csv",
+        index=False,
+        encoding="utf-8-sig",
+    )
+
+    # --------------------------------------------------------
+    # Threshold
+    # --------------------------------------------------------
+
+    filtered_profile = (
+        filter_error_profile(
+            raw_profile,
+            min_count=min_count,
+            min_ratio=min_ratio,
+        )
+    )
+
+    filtered_profile_df = pd.DataFrame(
+        filtered_profile
+    )
+
+    filtered_profile_df.to_csv(
+        output_dir
+        / "filtered_error_profile.csv",
+        index=False,
+        encoding="utf-8-sig",
+    )
+
+    print(
+        f"Raw profile errors      : "
+        f"{len(raw_profile)}"
+    )
+
+    print(
+        f"Filtered profile errors : "
+        f"{len(filtered_profile)}"
+    )
+
+    # --------------------------------------------------------
+    # Sample weights
+    # --------------------------------------------------------
+
+    print(
+        "Train sample weight 계산 중..."
+    )
+
+    weight_rows = (
+        calculate_sample_weights(
+            reference_prediction_pairs,
+            filtered_profile,
+            alpha=alpha,
+            base_weight=1.0,
+            max_weight=max_weight,
+        )
+    )
+
+    if (
+        len(weight_rows)
+        != len(train_dataset)
+    ):
+        raise RuntimeError(
+            "계산된 sample weight 수와 "
+            "Dataset sample 수가 다릅니다.\n"
+            f"Weights: {len(weight_rows)}\n"
+            f"Dataset: {len(train_dataset)}"
+        )
+
+    sample_weights = [
+        float(
+            row["sample_weight"]
+        )
+        for row in weight_rows
+    ]
+
+    # --------------------------------------------------------
+    # Dataset에 weight 연결
+    # --------------------------------------------------------
+
+    train_dataset.set_sample_weights(
+        sample_weights
+    )
+
+    # --------------------------------------------------------
+    # Weight 결과 저장
+    # --------------------------------------------------------
+
+    weight_save_rows = []
+
+    for sample_id, row in zip(
+        sample_ids,
+        weight_rows,
+    ):
+
+        weight_save_rows.append(
+            {
+                "sample_id": (
+                    sample_id
+                ),
+                "reference_text": (
+                    row["reference_text"]
+                ),
+                "prediction_text": (
+                    row["prediction_text"]
+                ),
+                "num_profile_errors": (
+                    row[
+                        "num_profile_errors"
+                    ]
+                ),
+                "profile_ratio_sum": (
+                    row[
+                        "profile_ratio_sum"
+                    ]
+                ),
+                "sample_weight": (
+                    row[
+                        "sample_weight"
+                    ]
+                ),
+                "matched_errors": (
+                    json.dumps(
+                        row[
+                            "matched_errors"
+                        ],
+                        ensure_ascii=False,
+                    )
+                ),
+            }
+        )
+
+    pd.DataFrame(
+        weight_save_rows
+    ).to_csv(
+        output_dir
+        / "train_sample_weights.csv",
+        index=False,
+        encoding="utf-8-sig",
+    )
+
+    # --------------------------------------------------------
+    # Weight summary
+    # --------------------------------------------------------
+
+    weights_array = np.asarray(
+        sample_weights,
+        dtype=float,
+    )
+
+    weighted_sample_count = int(
+        (
+            weights_array > 1.0
+        ).sum()
+    )
+
+    print()
+    print("-" * 70)
+    print("Error Profile 요약")
+    print("-" * 70)
+
+    print(
+        f"Train samples    : "
+        f"{len(train_dataset)}"
+    )
+
+    print(
+        f"Profile errors   : "
+        f"{len(filtered_profile)}"
+    )
+
+    print(
+        f"Weighted samples : "
+        f"{weighted_sample_count}"
+        f" / {len(train_dataset)}"
+    )
+
+    print(
+        f"Weight min       : "
+        f"{weights_array.min():.4f}"
+    )
+
+    print(
+        f"Weight mean      : "
+        f"{weights_array.mean():.4f}"
+    )
+
+    print(
+        f"Weight max       : "
+        f"{weights_array.max():.4f}"
+    )
+
+    print("-" * 70)
 
 
 # ============================================================
@@ -335,6 +772,50 @@ def parse_args() -> argparse.Namespace:
     )
 
     # --------------------------------------------------------
+    # Error Profile
+    # --------------------------------------------------------
+
+    parser.add_argument(
+        "--min_count",
+        type=int,
+        default=2,
+        help=(
+            "Error Profile에 포함할 "
+            "최소 오류 반복 횟수"
+        ),
+    )
+
+    parser.add_argument(
+        "--min_ratio",
+        type=float,
+        default=0.0,
+        help=(
+            "Error Profile에 포함할 "
+            "최소 오류 비율"
+        ),
+    )
+
+    parser.add_argument(
+        "--alpha",
+        type=float,
+        default=0.5,
+        help=(
+            "Error Profile sample "
+            "weight 강도"
+        ),
+    )
+
+    parser.add_argument(
+        "--max_weight",
+        type=float,
+        default=None,
+        help=(
+            "sample weight 최대값. "
+            "미지정 시 제한 없음"
+        ),
+    )
+
+    # --------------------------------------------------------
     # Training
     # --------------------------------------------------------
 
@@ -410,6 +891,37 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
 
     args = parse_args()
+
+    # ========================================================
+    # Argument validation
+    # ========================================================
+
+    if args.min_count < 1:
+        raise ValueError(
+            "--min_count는 1 이상이어야 합니다."
+        )
+
+    if not (
+        0.0
+        <= args.min_ratio
+        <= 1.0
+    ):
+        raise ValueError(
+            "--min_ratio는 0~1 사이여야 합니다."
+        )
+
+    if args.alpha < 0:
+        raise ValueError(
+            "--alpha는 0 이상이어야 합니다."
+        )
+
+    if (
+        args.max_weight is not None
+        and args.max_weight < 1.0
+    ):
+        raise ValueError(
+            "--max_weight는 1.0 이상이어야 합니다."
+        )
 
     # ========================================================
     # Seed / Device
@@ -577,7 +1089,7 @@ def main() -> None:
         )
 
     # ========================================================
-    # Feature Extractor
+    # Feature Extractor / Collator
     # ========================================================
 
     feature_extractor = (
@@ -599,14 +1111,97 @@ def main() -> None:
             feature_extractor=(
                 feature_extractor
             ),
-            tokenizer=(
-                tokenizer
-            ),
+            tokenizer=tokenizer,
         )
     )
 
     # ========================================================
+    # Output
+    # ========================================================
+
+    timestamp = (
+        datetime.now()
+        .strftime(
+            "%Y%m%d_%H%M%S"
+        )
+    )
+
+    output_dir = (
+        PROJECT_ROOT
+        / args.output_root
+        / args.mode
+        / args.speaker
+        / timestamp
+    )
+
+    output_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    print(
+        f"Output       : {output_dir}"
+    )
+
+    # ========================================================
+    # Error Profile
+    #
+    # 중요:
+    # Fine-tuning 전에 실행한다.
+    # ========================================================
+
+    if args.mode == "error_profile":
+
+        prepare_error_profile(
+            model=model,
+            train_dataset=train_dataset,
+            feature_extractor=(
+                feature_extractor
+            ),
+            tokenizer=tokenizer,
+            device=device,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            min_count=args.min_count,
+            min_ratio=args.min_ratio,
+            alpha=args.alpha,
+            max_weight=args.max_weight,
+            output_dir=output_dir,
+        )
+
+    # ========================================================
+    # Tokenizer / Config 저장
+    # ========================================================
+
+    tokenizer.save(
+        output_dir
+        / "extended_vocab.json"
+    )
+
+    run_config = vars(
+        args
+    ).copy()
+
+    with (
+        output_dir
+        / "run_config.json"
+    ).open(
+        "w",
+        encoding="utf-8",
+    ) as file:
+
+        json.dump(
+            run_config,
+            file,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    # ========================================================
     # DataLoader
+    #
+    # Error Profile mode라면 이 시점에는
+    # train_dataset에 sample_weight가 이미 들어 있다.
     # ========================================================
 
     train_loader = DataLoader(
@@ -666,6 +1261,9 @@ def main() -> None:
 
     # ========================================================
     # Optimizer
+    #
+    # Error Profile prediction은 optimizer 생성 전에
+    # 수행했기 때문에 모델 parameter는 변경되지 않는다.
     # ========================================================
 
     optimizer = torch.optim.AdamW(
@@ -674,59 +1272,6 @@ def main() -> None:
         weight_decay=(
             args.weight_decay
         ),
-    )
-
-    # ========================================================
-    # Output
-    # ========================================================
-
-    timestamp = (
-        datetime.now()
-        .strftime(
-            "%Y%m%d_%H%M%S"
-        )
-    )
-
-    output_dir = (
-        PROJECT_ROOT
-        / args.output_root
-        / args.mode
-        / args.speaker
-        / timestamp
-    )
-
-    output_dir.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    tokenizer.save(
-        output_dir
-        / "extended_vocab.json"
-    )
-
-    # 실행 조건 저장
-    run_config = vars(
-        args
-    ).copy()
-
-    with (
-        output_dir
-        / "run_config.json"
-    ).open(
-        "w",
-        encoding="utf-8",
-    ) as file:
-
-        json.dump(
-            run_config,
-            file,
-            ensure_ascii=False,
-            indent=2,
-        )
-
-    print(
-        f"Output       : {output_dir}"
     )
 
     # ========================================================
@@ -815,31 +1360,42 @@ def main() -> None:
         "speaker_id": args.speaker,
         "mode": args.mode,
         "best_epoch": (
-            summary[
-                "best_epoch"
-            ]
+            summary["best_epoch"]
         ),
         "best_valid_cer": (
-            summary[
-                "best_valid_cer"
-            ]
+            summary["best_valid_cer"]
         ),
         "test_loss": (
-            test_result[
-                "loss"
-            ]
+            test_result["loss"]
         ),
         "test_cer": (
-            test_result[
-                "cer"
-            ]
+            test_result["cer"]
         ),
         "test_wer": (
-            test_result[
-                "wer"
-            ]
+            test_result["wer"]
         ),
     }
+
+    # Error Profile mode에서는
+    # 실험 파라미터도 결과에 함께 기록한다.
+    if args.mode == "error_profile":
+
+        test_summary.update(
+            {
+                "min_count": (
+                    args.min_count
+                ),
+                "min_ratio": (
+                    args.min_ratio
+                ),
+                "alpha": (
+                    args.alpha
+                ),
+                "max_weight": (
+                    args.max_weight
+                ),
+            }
+        )
 
     with (
         output_dir
@@ -876,6 +1432,10 @@ def main() -> None:
         encoding="utf-8-sig",
     )
 
+    # ========================================================
+    # Complete
+    # ========================================================
+
     print()
     print("=" * 70)
     print("개인화 학습 및 평가 완료")
@@ -883,6 +1443,10 @@ def main() -> None:
 
     print(
         f"Speaker : {args.speaker}"
+    )
+
+    print(
+        f"Mode    : {args.mode}"
     )
 
     print(
