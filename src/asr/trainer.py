@@ -550,18 +550,17 @@ class CTCTrainer:
     def _get_resume_dir(
         self,
         output_dir: Path,
+        resume_key: str | None = None,
     ) -> Path:
         """
-        output_dir 이름이 재실행 때 조금 바뀌더라도
-        동일한 downstream 구조의 checkpoint를 찾을 수 있게
-        고정 resume 폴더를 사용한다.
+        Resume checkpoint 저장 폴더를 반환한다.
 
-        예:
-        outputs/
-            linear_ctc_20260808...
-            _resume/
-                LinearCTC/
-                    last_checkpoint.pt
+        기본 학습:
+            기존 방식 그대로 사용
+
+        개인화/하이퍼파라미터 실험:
+            resume_key를 지정하여
+            서로 다른 실험의 resume가 섞이지 않게 한다.
         """
 
         downstream = getattr(
@@ -579,6 +578,16 @@ class CTCTrainer:
         resume_dir = (
             output_dir.parent
             / "_resume"
+        )
+
+        if resume_key is not None:
+            resume_dir = (
+                resume_dir
+                / resume_key
+            )
+
+        resume_dir = (
+            resume_dir
             / model_name
         )
 
@@ -738,6 +747,7 @@ class CTCTrainer:
         epochs: int,
         output_dir: str | Path,
         early_stopping_patience: int = 5,
+        resume_key: str | None = None,
     ) -> dict[str, Any]:
 
         output_dir = Path(
@@ -751,7 +761,8 @@ class CTCTrainer:
 
         resume_dir = (
             self._get_resume_dir(
-                output_dir
+                output_dir,
+                resume_key=resume_key,
             )
         )
 

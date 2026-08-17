@@ -1415,6 +1415,26 @@ def main() -> None:
     )
 
     # ========================================================
+    # Resume key
+    # ========================================================
+
+    if args.mode == "error_profile":
+        resume_key = (
+            f"mc{args.min_count}"
+            f"_mr{args.min_ratio}"
+            f"_a{args.alpha}"
+            f"_mw{args.max_weight}"
+            f"_enc{args.encoder_mode}"
+            f"_lr{args.lr}"
+        )
+    else:
+        resume_key = (
+            f"baseline"
+            f"_enc{args.encoder_mode}"
+            f"_lr{args.lr}"
+        )
+
+    # ========================================================
     # Train
     # ========================================================
 
@@ -1426,6 +1446,7 @@ def main() -> None:
         early_stopping_patience=(
             args.patience
         ),
+        resume_key=resume_key,
     )
 
     # ========================================================
