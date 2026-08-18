@@ -844,6 +844,342 @@ def prepare_error_profile(
     print("-" * 70)
 
 
+
+# ============================================================
+# Reuse precomputed Raw Error Profile
+# ============================================================
+
+def prepare_error_profile_from_saved(
+    *,
+    train_dataset: PersonalizationIEUMDataset,
+    raw_profile_dir: Path,
+    min_count: int,
+    min_ratio: float,
+    alpha: float,
+    max_weight: float | None,
+    output_dir: Path,
+) -> dict[str, Any]:
+    """
+    37명 Raw Error Profile 생성 단계에서 저장한 결과를 재사용한다.
+
+    필요한 파일
+    -----------
+    train_general_predictions.csv
+    raw_error_profile.csv
+
+    범용 모델 재추론과 Raw Error Profile 재생성은 수행하지 않는다.
+    """
+
+    raw_profile_dir = Path(raw_profile_dir)
+
+    prediction_path = (
+        raw_profile_dir
+        / "train_general_predictions.csv"
+    )
+    raw_profile_path = (
+        raw_profile_dir
+        / "raw_error_profile.csv"
+    )
+
+    if not prediction_path.exists():
+        raise FileNotFoundError(
+            "train_general_predictions.csv를 찾을 수 없습니다.\n"
+            f"{prediction_path}"
+        )
+
+    if not raw_profile_path.exists():
+        raise FileNotFoundError(
+            "raw_error_profile.csv를 찾을 수 없습니다.\n"
+            f"{raw_profile_path}"
+        )
+
+    print()
+    print("=" * 70)
+    print("저장된 Raw Error Profile 재사용")
+    print("=" * 70)
+    print(f"Source    : {raw_profile_dir}")
+    print(f"min_count : {min_count}")
+    print(f"min_ratio : {min_ratio}")
+    print(f"alpha     : {alpha}")
+    print(f"max_weight: {max_weight}")
+
+    prediction_df = pd.read_csv(
+        prediction_path
+    )
+
+    required_prediction_columns = {
+        "sample_id",
+        "reference_text",
+        "prediction_text",
+    }
+    missing = (
+        required_prediction_columns
+        - set(prediction_df.columns)
+    )
+    if missing:
+        raise ValueError(
+            "train_general_predictions.csv 필수 컬럼 누락: "
+            f"{sorted(missing)}"
+        )
+
+    dataset_sample_ids = (
+        train_dataset.samples["sample_id"]
+        .astype(str)
+        .tolist()
+    )
+    prediction_sample_ids = (
+        prediction_df["sample_id"]
+        .astype(str)
+        .tolist()
+    )
+
+    if len(prediction_df) != len(train_dataset):
+        raise RuntimeError(
+            "저장된 prediction 수와 현재 Train Dataset 크기가 다릅니다.\n"
+            f"Predictions: {len(prediction_df)}\n"
+            f"Dataset: {len(train_dataset)}"
+        )
+
+    if prediction_sample_ids != dataset_sample_ids:
+        mismatch_index = next(
+            (
+                i
+                for i, (saved_id, dataset_id)
+                in enumerate(
+                    zip(
+                        prediction_sample_ids,
+                        dataset_sample_ids,
+                    )
+                )
+                if saved_id != dataset_id
+            ),
+            None,
+        )
+        raise RuntimeError(
+            "저장된 prediction의 sample_id 순서와 현재 Dataset 순서가 다릅니다.\n"
+            f"First mismatch index: {mismatch_index}"
+        )
+
+    prediction_df = prediction_df.fillna("")
+    prediction_rows = (
+        prediction_df[
+            [
+                "reference_text",
+                "prediction_text",
+            ]
+        ]
+        .to_dict(orient="records")
+    )
+
+    raw_profile_df = pd.read_csv(
+        raw_profile_path
+    )
+
+    required_profile_columns = {
+        "error_type",
+        "reference_syllable",
+        "predicted_syllable",
+        "count",
+        "reference_count",
+        "ratio",
+    }
+    missing = (
+        required_profile_columns
+        - set(raw_profile_df.columns)
+    )
+    if missing:
+        raise ValueError(
+            "raw_error_profile.csv 필수 컬럼 누락: "
+            f"{sorted(missing)}"
+        )
+
+    raw_profile_df = raw_profile_df.fillna(
+        {
+            "reference_syllable": "",
+            "predicted_syllable": "",
+        }
+    )
+    raw_profile = raw_profile_df.to_dict(
+        orient="records"
+    )
+
+    reference_prediction_pairs = [
+        (
+            str(row["reference_text"]),
+            str(row["prediction_text"]),
+        )
+        for row in prediction_rows
+    ]
+
+    # filter_error_profile()의 현재 규칙:
+    # substitution/deletion -> count + ratio
+    # insertion             -> count only
+    filtered_profile = filter_error_profile(
+        raw_profile,
+        min_count=min_count,
+        min_ratio=min_ratio,
+    )
+
+    pd.DataFrame(
+        filtered_profile,
+        columns=[
+            "error_type",
+            "reference_syllable",
+            "predicted_syllable",
+            "count",
+            "reference_count",
+            "ratio",
+        ],
+    ).to_csv(
+        output_dir
+        / "filtered_error_profile.csv",
+        index=False,
+        encoding="utf-8-sig",
+    )
+
+    print(
+        f"Raw profile errors      : {len(raw_profile)}"
+    )
+    print(
+        f"Filtered profile errors : {len(filtered_profile)}"
+    )
+
+    weight_rows = calculate_sample_weights(
+        reference_prediction_pairs,
+        filtered_profile,
+        alpha=alpha,
+        base_weight=1.0,
+        max_weight=max_weight,
+    )
+
+    if len(weight_rows) != len(train_dataset):
+        raise RuntimeError(
+            "계산된 sample weight 수와 Dataset 크기가 다릅니다.\n"
+            f"Weights: {len(weight_rows)}\n"
+            f"Dataset: {len(train_dataset)}"
+        )
+
+    sample_weights = [
+        float(row["sample_weight"])
+        for row in weight_rows
+    ]
+    train_dataset.set_sample_weights(
+        sample_weights
+    )
+
+    weight_save_rows = []
+    for sample_id, row in zip(
+        dataset_sample_ids,
+        weight_rows,
+    ):
+        weight_save_rows.append(
+            {
+                "sample_id": sample_id,
+                "reference_text": row["reference_text"],
+                "prediction_text": row["prediction_text"],
+                "num_profile_errors": row["num_profile_errors"],
+                "profile_ratio_sum": row["profile_ratio_sum"],
+                "sample_weight": row["sample_weight"],
+                "matched_errors": json.dumps(
+                    row["matched_errors"],
+                    ensure_ascii=False,
+                ),
+            }
+        )
+
+    pd.DataFrame(
+        weight_save_rows
+    ).to_csv(
+        output_dir
+        / "train_sample_weights.csv",
+        index=False,
+        encoding="utf-8-sig",
+    )
+
+    weights_array = np.asarray(
+        sample_weights,
+        dtype=float,
+    )
+    weighted_sample_count = int(
+        (weights_array > 1.0).sum()
+    )
+    weighted_sample_ratio = (
+        weighted_sample_count
+        / len(train_dataset)
+        if len(train_dataset) > 0
+        else 0.0
+    )
+
+    raw_by_type = (
+        raw_profile_df["error_type"]
+        .value_counts()
+        .to_dict()
+    )
+    filtered_df = pd.DataFrame(
+        filtered_profile
+    )
+    if filtered_df.empty:
+        filtered_by_type = {}
+    else:
+        filtered_by_type = (
+            filtered_df["error_type"]
+            .value_counts()
+            .to_dict()
+        )
+
+    profile_summary = {
+        "raw_profile_entries": len(raw_profile),
+        "filtered_profile_entries": len(filtered_profile),
+        "raw_profile_by_error_type": raw_by_type,
+        "filtered_profile_by_error_type": filtered_by_type,
+        "train_samples": len(train_dataset),
+        "weighted_samples": weighted_sample_count,
+        "weighted_sample_ratio": weighted_sample_ratio,
+        "weight_min": float(weights_array.min()),
+        "weight_mean": float(weights_array.mean()),
+        "weight_max": float(weights_array.max()),
+        "min_count": min_count,
+        "min_ratio": min_ratio,
+        "alpha": alpha,
+        "max_weight": max_weight,
+        "raw_profile_reused": True,
+        "raw_profile_source": str(raw_profile_dir),
+    }
+
+    with (
+        output_dir
+        / "error_profile_summary.json"
+    ).open(
+        "w",
+        encoding="utf-8",
+    ) as file:
+        json.dump(
+            profile_summary,
+            file,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    print()
+    print("-" * 70)
+    print("Error Profile 요약")
+    print("-" * 70)
+    print(f"Train samples    : {len(train_dataset)}")
+    print(f"Profile errors   : {len(filtered_profile)}")
+    print(
+        f"Weighted samples : {weighted_sample_count}"
+        f" / {len(train_dataset)}"
+        f" ({weighted_sample_ratio:.2%})"
+    )
+    print(f"Weight min       : {weights_array.min():.4f}")
+    print(f"Weight mean      : {weights_array.mean():.4f}")
+    print(f"Weight max       : {weights_array.max():.4f}")
+    print("Filtered by type :", filtered_by_type)
+    print("-" * 70)
+
+    return profile_summary
+
+
 # ============================================================
 # Arguments
 # ============================================================
@@ -968,6 +1304,25 @@ def parse_args() -> argparse.Namespace:
         help=(
             "sample weight 최대값. "
             "미지정 시 제한 없음"
+        ),
+    )
+
+    parser.add_argument(
+        "--raw_profile_dir",
+        type=str,
+        default=None,
+        help=(
+            "미리 생성한 화자별 Raw Error Profile 디렉토리. "
+            "지정하면 train prediction과 raw profile을 재사용한다."
+        ),
+    )
+
+    parser.add_argument(
+        "--skip_test",
+        action="store_true",
+        help=(
+            "학습 후 Test 평가를 수행하지 않는다. "
+            "Threshold/alpha 선택 실험에서 사용한다."
         ),
     )
 
@@ -1239,16 +1594,19 @@ def main() -> None:
         ),
     )
 
-    test_dataset = create_dataset(
-        csv_path=csv_path,
-        audio_root=audio_root,
-        speaker_id=args.speaker,
-        split="test",
-        sample_rate=args.sample_rate,
-        max_audio_seconds=(
-            args.max_audio_seconds
-        ),
-    )
+    test_dataset = None
+
+    if not args.skip_test:
+        test_dataset = create_dataset(
+            csv_path=csv_path,
+            audio_root=audio_root,
+            speaker_id=args.speaker,
+            split="test",
+            sample_rate=args.sample_rate,
+            max_audio_seconds=(
+                args.max_audio_seconds
+            ),
+        )
 
     print(
         f"Train chunks : "
@@ -1260,10 +1618,13 @@ def main() -> None:
         f"{len(valid_dataset)}"
     )
 
-    print(
-        f"Test chunks  : "
-        f"{len(test_dataset)}"
-    )
+    if test_dataset is None:
+        print("Test chunks  : SKIPPED")
+    else:
+        print(
+            f"Test chunks  : "
+            f"{len(test_dataset)}"
+        )
 
     if len(train_dataset) == 0:
         raise ValueError(
@@ -1275,7 +1636,10 @@ def main() -> None:
             "Valid dataset이 비어 있습니다."
         )
 
-    if len(test_dataset) == 0:
+    if (
+        test_dataset is not None
+        and len(test_dataset) == 0
+    ):
         raise ValueError(
             "Test dataset이 비어 있습니다."
         )
@@ -1344,28 +1708,42 @@ def main() -> None:
 
     if args.mode == "error_profile":
 
-        prepare_error_profile(
-            model=model,
-            train_dataset=train_dataset,
-            feature_extractor=(
-                feature_extractor
-            ),
-            tokenizer=tokenizer,
-            device=device,
-            original_vocab_size=(
-                original_vocab_size
-            ),
-            supported_reference_syllables=(
-                supported_reference_syllables
-            ),
-            batch_size=args.batch_size,
-            num_workers=args.num_workers,
-            min_count=args.min_count,
-            min_ratio=args.min_ratio,
-            alpha=args.alpha,
-            max_weight=args.max_weight,
-            output_dir=output_dir,
-        )
+        if args.raw_profile_dir is not None:
+            prepare_error_profile_from_saved(
+                train_dataset=train_dataset,
+                raw_profile_dir=Path(
+                    args.raw_profile_dir
+                ),
+                min_count=args.min_count,
+                min_ratio=args.min_ratio,
+                alpha=args.alpha,
+                max_weight=args.max_weight,
+                output_dir=output_dir,
+            )
+
+        else:
+            prepare_error_profile(
+                model=model,
+                train_dataset=train_dataset,
+                feature_extractor=(
+                    feature_extractor
+                ),
+                tokenizer=tokenizer,
+                device=device,
+                original_vocab_size=(
+                    original_vocab_size
+                ),
+                supported_reference_syllables=(
+                    supported_reference_syllables
+                ),
+                batch_size=args.batch_size,
+                num_workers=args.num_workers,
+                min_count=args.min_count,
+                min_ratio=args.min_ratio,
+                alpha=args.alpha,
+                max_weight=args.max_weight,
+                output_dir=output_dir,
+            )
 
     # ========================================================
     # Tokenizer / Config 저장
@@ -1424,16 +1802,19 @@ def main() -> None:
         ),
     )
 
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=args.num_workers,
-        collate_fn=collator,
-        pin_memory=(
-            device.type == "cuda"
-        ),
-    )
+    test_loader = None
+
+    if test_dataset is not None:
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=args.num_workers,
+            collate_fn=collator,
+            pin_memory=(
+                device.type == "cuda"
+            ),
+        )
 
     # ========================================================
     # Trainable parameters
@@ -1522,6 +1903,75 @@ def main() -> None:
     )
 
     # ========================================================
+    # Validation 결과 저장
+    #
+    # Threshold / alpha 탐색에서는 Test 결과를 사용하지 않는다.
+    # ========================================================
+
+    validation_summary = {
+        "speaker_id": args.speaker,
+        "mode": args.mode,
+        "best_epoch": summary["best_epoch"],
+        "best_valid_cer": summary["best_valid_cer"],
+        "min_count": (
+            args.min_count
+            if args.mode == "error_profile"
+            else None
+        ),
+        "min_ratio": (
+            args.min_ratio
+            if args.mode == "error_profile"
+            else None
+        ),
+        "alpha": (
+            args.alpha
+            if args.mode == "error_profile"
+            else None
+        ),
+        "max_weight": (
+            args.max_weight
+            if args.mode == "error_profile"
+            else None
+        ),
+        "encoder_mode": args.encoder_mode,
+        "lr": args.lr,
+        "skip_test": args.skip_test,
+    }
+
+    with (
+        output_dir
+        / "validation_summary.json"
+    ).open(
+        "w",
+        encoding="utf-8",
+    ) as file:
+        json.dump(
+            validation_summary,
+            file,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    if args.skip_test:
+        print()
+        print("=" * 70)
+        print("개인화 학습 완료 - Test 평가 생략")
+        print("=" * 70)
+        print(f"Speaker    : {args.speaker}")
+        print(f"Mode       : {args.mode}")
+        print(
+            f"Best epoch : "
+            f"{summary['best_epoch']}"
+        )
+        print(
+            f"Valid CER  : "
+            f"{summary['best_valid_cer']:.4f}"
+        )
+        print("Test       : SKIPPED")
+        print(f"Results    : {output_dir}")
+        return
+
+    # ========================================================
     # Best checkpoint 다시 로드
     # ========================================================
 
@@ -1556,6 +2006,11 @@ def main() -> None:
     print("=" * 70)
     print("Best model Test 평가")
     print("=" * 70)
+
+    if test_loader is None:
+        raise RuntimeError(
+            "Test 평가가 요청되었지만 test_loader가 없습니다."
+        )
 
     test_result = trainer.evaluate(
         test_loader
