@@ -684,11 +684,20 @@ def filter_error_profile(
     Raw Error Profile에서
     threshold 조건을 만족하는 오류만 선택합니다.
 
-    이 함수는 threshold 실험에서 사용합니다.
+    Threshold 규칙
+    ----------------
+    substitution / deletion:
+        count >= min_count
+        AND
+        ratio >= min_ratio
 
-    주의:
-        min_count / min_ratio의 최종값은
-        이 파일에서 결정하지 않습니다.
+    insertion:
+        count >= min_count
+
+    insertion은 대응되는 reference 음절이 없어서
+    substitution / deletion과 동일한 의미의
+    ratio를 정의할 수 없으므로
+    min_ratio 조건을 적용하지 않습니다.
     """
 
     if min_count < 1:
@@ -707,13 +716,22 @@ def filter_error_profile(
             "min_ratio는 0~1 사이여야 합니다."
         )
 
-    return [
-        row
-        for row in raw_profile
-        if (
-            row["count"]
-            >= min_count
-            and row["ratio"]
-            >= min_ratio
-        )
-    ]
+    filtered_profile = []
+
+    for row in raw_profile:
+
+        # 모든 오류 유형에 공통 적용
+        if row["count"] < min_count:
+            continue
+
+        # insertion은 count만 적용
+        if row["error_type"] == "insertion":
+            filtered_profile.append(row)
+            continue
+
+        # substitution / deletion은
+        # count + ratio 모두 적용
+        if row["ratio"] >= min_ratio:
+            filtered_profile.append(row)
+
+    return filtered_profile
