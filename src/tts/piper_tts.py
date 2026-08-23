@@ -47,6 +47,8 @@ def synthesize_text_to_speech(text: str) -> Path:
         str(CONFIG_PATH),
         "-f",
         str(output_path),
+        "--length-scale",
+        "5",
     ]
 
     try:

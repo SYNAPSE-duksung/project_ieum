@@ -49,7 +49,7 @@ class ButtonController:
 
         self.record_button = Button(
             self.record_pin,
-            pull_up=True,
+            pull_up=False,
             bounce_time=0.1,
         )
 

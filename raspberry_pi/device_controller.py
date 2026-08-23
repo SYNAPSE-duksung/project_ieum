@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import requests
+
 from pathlib import Path
 from typing import Optional
 
@@ -19,11 +21,9 @@ class DeviceController:
 
     def __init__(
         self,
-        server_url: str = "http://127.0.0.1:8000",
+        server_url: str = "http://192.168.137.1:8000",
         speaker_id: str = "HYH_M_22",
-        test_audio_path: str | Path | None = None,
         simulate_buttons: bool = True,
-        recording_output_path: str | Path = "recorded_audio.wav",
         tts_output_path: str | Path = "outputs/raspberry_pi_tts.wav",
     ) -> None:
         if speaker_id not in SUPPORTED_SPEAKERS:
@@ -39,8 +39,8 @@ class DeviceController:
         )
 
         self.recorder = AudioRecorder(
-            output_path=recording_output_path,
-            test_audio_path=test_audio_path,
+            output_path="outputs/recorded_input.wav",
+            audio_device="plughw:3,0",
         )
 
         self.current_audio_path: Optional[str] = None
@@ -57,6 +57,8 @@ class DeviceController:
         self.buttons = ButtonController(
             record_callback=self.on_record_button,
             tts_callback=self.on_tts_button,
+            record_pin=18,
+            tts_pin=27,
             simulate=simulate_buttons,
         )
 
@@ -87,6 +89,12 @@ class DeviceController:
 
         self._clear_current_result()
         self._recording_cycle_pending = True
+
+        self._update_ui(
+            status="recording",
+            general_text="",
+            personalized_text="",
+        )
 
         print(
             "[DEVICE] 녹음 중입니다. 같은 버튼을 다시 누르면 종료됩니다."
@@ -121,6 +129,10 @@ class DeviceController:
         print("[DEVICE] 범용 / 개인화 ASR 처리 시작")
         print(f"[DEVICE] Speaker: {self.speaker_id}")
 
+        self._update_ui(
+            status="processing",
+        )
+
         try:
             result = self.api_client.transcribe_compare(
                 audio_path=audio_path,
@@ -152,6 +164,12 @@ class DeviceController:
         self.current_general_text = general_text
         self.current_personalized_text = personalized_text
         self.current_tts_text = personalized_text or general_text or None
+
+        self._update_ui(
+            status="complete",
+            general_text=general_text,
+            personalized_text=personalized_text,
+        )
 
         self._display_transcription_results()
 
@@ -202,10 +220,11 @@ class DeviceController:
         self,
         audio_path: str | Path,
     ) -> None:
-        """macOS에서는 afplay, Raspberry Pi에서는 aplay로 재생한다."""
+        """macOS에서는 afplay, Raspberry Pi에서는 pw-play로 재생한다."""
 
         import platform
         import subprocess
+        import wave
 
         path = Path(audio_path)
 
@@ -213,12 +232,46 @@ class DeviceController:
             print(f"[ERROR] 재생할 WAV 파일이 없습니다: {path}")
             return
 
-        command = [
-            "afplay" if platform.system() == "Darwin" else "aplay",
-            str(path),
-        ]
+        play_path = path
 
-        print(f"[DEVICE] 음성 재생: {path}")
+        if platform.system() != "Darwin":
+            try:
+                with wave.open(str(path), "rb") as src:
+                    params = src.getparams()
+                    frames = src.readframes(src.getnframes())
+
+                silence_seconds = 0.7
+                silence_frames = int(
+                    params.framerate * silence_seconds
+                )
+
+                silence = (
+                    b"\x00"
+                    * silence_frames
+                    * params.nchannels
+                    * params.sampwidth
+                )
+
+                padded_path = path.with_name(
+                    path.stem + "_padded.wav"
+                )
+
+                with wave.open(str(padded_path), "wb") as dst:
+                    dst.setparams(params)
+                    dst.writeframes(silence + frames)
+
+                play_path = padded_path
+
+            except Exception as error:
+                print(f"[WARN] 앞 무음 추가 실패: {error}")
+                play_path = path
+
+        if platform.system() == "Darwin":
+            command = ["afplay", str(play_path)]
+        else:
+            command = ["pw-play", str(play_path)]
+
+        print(f"[DEVICE] 음성 재생: {play_path}")
 
         try:
             subprocess.run(
@@ -237,6 +290,7 @@ class DeviceController:
 
         except OSError as error:
             print(f"[ERROR] 오디오 재생 실행 실패: {error}")
+
 
     def _clear_current_result(self) -> None:
         self.current_audio_path = None
@@ -269,14 +323,37 @@ class DeviceController:
         print("[3] TTS 버튼: 선택 결과 합성 및 재생")
         self.buttons.simulate_tts_button()
 
+    def _update_ui(
+        self,
+        status: str,
+        general_text: str | None = None,
+        personalized_text: str | None = None,
+    ) -> None:
+        payload = {
+            "status": status,
+        }
+
+        if general_text is not None:
+            payload["general_text"] = general_text
+
+        if personalized_text is not None:
+            payload["personalized_text"] = personalized_text
+
+        try:
+            requests.post(
+                "http://127.0.0.1:5000/api/device/state",
+                json=payload,
+                timeout=2,
+            )
+        except requests.RequestException as error:
+            print(f"[UI] 상태 전달 실패: {error}")
 
 if __name__ == "__main__":
     from signal import pause
 
     controller = DeviceController(
-        server_url="http://127.0.0.1:8000",
+        server_url="http://192.168.137.1:8000",
         speaker_id="HYH_M_22",
-        test_audio_path=None,
         simulate_buttons=False,
     )
 
@@ -284,7 +361,7 @@ if __name__ == "__main__":
     print("IEUM Raspberry Pi Controller")
     print("=" * 60)
     print(f"개인화 화자   : {controller.speaker_id}")
-    print("녹음 버튼     : GPIO 17")
+    print("녹음 버튼     : GPIO 18")
     print("읽어주기 버튼 : GPIO 27")
     print("버튼 입력 대기 중...")
     print("종료: Ctrl+C")

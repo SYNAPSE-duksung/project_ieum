@@ -199,11 +199,58 @@
                 id="resultLabel"
                 class="result-label"
             >
-                인식된 문장
+                음성 인식 결과
             </div>
 
             <div id="result">
                 아직 인식된 문장이 없습니다.
+            </div>
+
+            <div
+                id="comparisonResults"
+                style="display: none; width: 100%;"
+            >
+                <div style="margin-bottom: 28px;">
+                    <div
+                        style="
+                            color: #6b7683;
+                            font-size: 18px;
+                            font-weight: 700;
+                            margin-bottom: 10px;
+                        "
+                    >
+                        범용 모델
+                    </div>
+
+                    <div
+                        id="generalResult"
+                        style="
+                            font-size: 26px;
+                            line-height: 1.6;
+                        "
+                    ></div>
+                </div>
+
+                <div>
+                    <div
+                        style="
+                            color: #263f5d;
+                            font-size: 18px;
+                            font-weight: 700;
+                            margin-bottom: 10px;
+                        "
+                    >
+                        개인화 모델
+                    </div>
+
+                    <div
+                        id="personalizedResult"
+                        style="
+                            font-size: 26px;
+                            line-height: 1.6;
+                        "
+                    ></div>
+                </div>
             </div>
         </section>
 
@@ -220,9 +267,9 @@
                 id="ttsButton"
                 class="tts-button"
                 type="button"
-                disabled
+                onclick="requestTTS()"
             >
-                TTS 연결 대기
+                TTS 읽어주기
             </button>
         </div>
     </main>
@@ -249,6 +296,15 @@
 
         const resultLabel =
             document.getElementById("resultLabel");
+
+        const comparisonResults =
+            document.getElementById("comparisonResults");
+
+        const generalResult =
+            document.getElementById("generalResult");
+
+        const personalizedResult =
+            document.getElementById("personalizedResult");
 
         const actions =
             document.getElementById("actions");
@@ -331,6 +387,12 @@
                 resultLabel.style.display = "none";
                 result.textContent =
                     "실제 음성을 녹음하고 있습니다.";
+
+                result.style.display = "block";
+                comparisonResults.style.display = "none";
+
+                generalResult.textContent = "";
+                personalizedResult.textContent = "";
 
                 actions.style.display = "none";
 
@@ -594,7 +656,7 @@
             );
 
             const response = await fetch(
-                "/api/transcribe",
+                "/api/transcribe/compare",
                 {
                     method: "POST",
                     body: formData
@@ -618,32 +680,52 @@
                 );
             }
 
-            showTranscript(data.text);
-        }
-
-        function showTranscript(transcript) {
-            statusText.textContent = "인식 완료";
-
-            resultLabel.textContent =
-                "인식된 문장";
-
-            resultLabel.style.display =
-                "block";
-
-            result.textContent = transcript;
-
-            recordButton.style.display =
-                "none";
-
-            recordButton.disabled = false;
-
-            recordButton.classList.remove(
-                "recording",
-                "processing"
+            showTranscripts(
+                data.general_text,
+                data.personalized_text
             );
 
-            actions.style.display = "flex";
+        
         }
+
+
+
+        function showTranscripts(
+                generalText,
+                personalizedText
+            ) {
+                statusText.textContent = "인식 완료";
+
+                resultLabel.textContent =
+                    "범용 · 개인화 모델 비교";
+
+                resultLabel.style.display =
+                    "block";
+
+                result.style.display = "none";
+
+                comparisonResults.style.display =
+                    "block";
+
+                generalResult.textContent =
+                    generalText || "(인식 결과 없음)";
+
+                personalizedResult.textContent =
+                    personalizedText || "(인식 결과 없음)";
+
+                recordButton.style.display =
+                    "none";
+
+                recordButton.disabled = false;
+
+                recordButton.classList.remove(
+                    "recording",
+                    "processing"
+                );
+
+                actions.style.display = "flex";
+            }
+        
 
         function showError(message) {
             isRecording = false;
@@ -666,6 +748,10 @@
             resultLabel.style.display =
                 "none";
 
+
+            result.style.display = "block";
+            comparisonResults.style.display = "none";
+
             result.textContent = message;
 
             recordButton.style.display =
@@ -681,7 +767,30 @@
             actions.style.display = "flex";
         }
 
-        function resetRecording() {
+        async function resetRecording() {
+
+            try {
+                await fetch(
+                    "/api/device/state",
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            status: "idle",
+                            general_text: "",
+                            personalized_text: ""
+                        })
+                    }
+                );
+            } catch (error) {
+                console.error(
+                    "장치 상태 초기화 실패:",
+                    error
+                );
+            }
+
             clearInterval(recordingTimer);
             recordingTimer = null;
 
@@ -716,6 +825,13 @@
             result.textContent =
                 "아직 인식된 문장이 없습니다.";
 
+            result.style.display = "block";
+
+            comparisonResults.style.display = "none";
+
+            generalResult.textContent = "";
+            personalizedResult.textContent = "";
+
             actions.style.display = "none";
 
             recordButton.style.display =
@@ -731,6 +847,107 @@
                 "processing"
             );
         }
+
+        async function requestTTS() {
+            const ttsButton =
+                document.getElementById("ttsButton");
+
+            try {
+                ttsButton.disabled = true;
+                ttsButton.textContent = "재생 중";
+
+                const response = await fetch(
+                    "/api/device/tts",
+                    {
+                        method: "POST"
+                    }
+                );
+
+                const data = await response.json();
+
+                if (!response.ok || !data.success) {
+                    throw new Error(
+                        data.error || "TTS 재생에 실패했습니다."
+                    );
+                }
+
+                ttsButton.textContent = "TTS 읽어주기";
+
+            } catch (error) {
+                console.error(error);
+                alert(error.message);
+                ttsButton.textContent = "TTS 읽어주기";
+
+            } finally {
+                ttsButton.disabled = false;
+            }
+        }
+
+        async function updateDeviceState() {
+            try {
+                const response = await fetch("/api/device/state");
+                const data = await response.json();
+
+                if (!data.success) {
+                    return;
+                }
+
+                if (data.status === "idle") {
+                    statusText.textContent =
+                        "버튼을 눌러 말씀해 주세요";
+                }
+
+                if (data.status === "recording") {
+                    statusText.textContent = "녹음 중";
+
+                    resultLabel.style.display = "none";
+
+                    result.style.display = "block";
+                    comparisonResults.style.display = "none";
+
+                    result.textContent =
+                        "음성을 녹음하고 있습니다.";
+                }
+
+                if (data.status === "processing") {
+                    statusText.textContent = "음성 처리 중";
+
+                    resultLabel.style.display = "none";
+
+                    result.style.display = "block";
+                    comparisonResults.style.display = "none";
+
+                    result.textContent =
+                        "범용·개인화 모델이 음성을 인식하고 있습니다...";
+                }
+
+                if (data.status === "complete") {
+                    statusText.textContent = "인식 완료";
+
+                    result.style.display = "none";
+                    comparisonResults.style.display = "block";
+
+                    resultLabel.style.display = "block";
+                    resultLabel.textContent =
+                        "범용 · 개인화 모델 비교";
+
+                    generalResult.textContent =
+                        data.general_text || "(인식 결과 없음)";
+
+                    personalizedResult.textContent =
+                        data.personalized_text || "(인식 결과 없음)";
+
+                    actions.style.display = "flex";
+                    recordButton.style.display = "none";
+                }
+
+            } catch (error) {
+                console.error("장치 상태 확인 실패:", error);
+            }
+        }
+
+        setInterval(updateDeviceState, 500);
+        updateDeviceState();
 
         window.addEventListener(
             "beforeunload",
