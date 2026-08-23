@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+    <title>IEUM</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: Arial, sans-serif;
+            background: #f7f8fa;
+            color: #222;
+        }
+
+        .container {
+            width: min(850px, calc(100% - 40px));
+            margin: 0 auto;
+            padding: 65px 0;
+            text-align: center;
+        }
+
+        h1 {
+            margin: 0;
+            color: #263f5d;
+            font-size: 44px;
+            letter-spacing: 2px;
+        }
+
+        .subtitle {
+            margin: 25px 0 18px;
+            font-size: 27px;
+            font-weight: 600;
+        }
+
+        #status {
+            display: inline-block;
+            min-width: 190px;
+            margin: 0 0 42px;
+            padding: 9px 18px;
+            border-radius: 30px;
+            background: #edf1f5;
+            color: #5b6775;
+            font-size: 17px;
+            font-weight: 600;
+        }
+
+        button {
+            border: none;
+            border-radius: 14px;
+            color: white;
+            font-size: 22px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.2s;
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-1px);
+        }
+
+        button:disabled {
+            cursor: not-allowed;
+            opacity: 0.65;
+        }
+
+        #recordButton {
+            min-width: 220px;
+            padding: 18px 40px;
+            background: #62ad5c;
+        }
+
+        #recordButton:hover:not(:disabled) {
+            background: #529c4d;
+        }
+
+        #recordButton.recording {
+            background: #df5b5b;
+        }
+
+        #recordButton.recording:hover {
+            background: #ca4d4d;
+        }
+
+        #recordButton.processing {
+            background: #8b96a3;
+        }
+
+        .result-card {
+            width: 100%;
+            min-height: 210px;
+            margin: 38px auto 0;
+            padding: 30px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: white;
+            border: 1px solid #e8ecf1;
+            border-radius: 20px;
+            box-shadow: 0 8px 24px rgba(32, 45, 60, 0.08);
+        }
+
+        .result-label {
+            display: none;
+            margin-bottom: 18px;
+            color: #6b7683;
+            font-size: 17px;
+            font-weight: 600;
+        }
+
+        #result {
+            font-size: 27px;
+            line-height: 1.6;
+            word-break: keep-all;
+        }
+
+        .actions {
+            display: none;
+            justify-content: center;
+            gap: 14px;
+            margin-top: 24px;
+        }
+
+        .secondary-button {
+            padding: 15px 28px;
+            background: #697685;
+        }
+
+        .secondary-button:hover:not(:disabled) {
+            background: #586471;
+        }
+
+        .tts-button {
+            padding: 15px 28px;
+            background: #3f7fc4;
+        }
+
+        .tts-button:hover:not(:disabled) {
+            background: #326dab;
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                padding-top: 45px;
+            }
+
+            h1 {
+                font-size: 38px;
+            }
+
+            .subtitle {
+                font-size: 22px;
+            }
+
+            #result {
+                font-size: 23px;
+            }
+
+            .actions {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <main class="container">
+        <h1>IEUM</h1>
+
+        <div class="subtitle">
+            구음장애 의사소통 보조 시스템
+        </div>
+
+        <div id="status">
+            버튼을 눌러 말씀해 주세요
+        </div>
+
+        <div>
+            <button
+                id="recordButton"
+                type="button"
+                onclick="toggleRecording()"
+            >
+                녹음 시작
+            </button>
+        </div>
+
+        <section class="result-card" aria-live="polite">
+            <div
+                id="resultLabel"
+                class="result-label"
+            >
+                인식된 문장
+            </div>
+
+            <div id="result">
+                아직 인식된 문장이 없습니다.
+            </div>
+        </section>
+
+        <div id="actions" class="actions">
+            <button
+                class="secondary-button"
+                type="button"
+                onclick="resetRecording()"
+            >
+                다시 녹음
+            </button>
+
+            <button
+                id="ttsButton"
+                class="tts-button"
+                type="button"
+                disabled
+            >
+                TTS 연결 대기
+            </button>
+        </div>
+    </main>
+
+    <script>
+        let isRecording = false;
+        let mediaRecorder = null;
+        let microphoneStream = null;
+        let audioChunks = [];
+        let recordingTimer = null;
+        let recordingSeconds = 0;
+
+        const MAX_RECORDING_SECONDS = 30;
+        const TARGET_SAMPLE_RATE = 16000;
+
+        const recordButton =
+            document.getElementById("recordButton");
+
+        const statusText =
+            document.getElementById("status");
+
+        const result =
+            document.getElementById("result");
+
+        const resultLabel =
+            document.getElementById("resultLabel");
+
+        const actions =
+            document.getElementById("actions");
+
+        async function toggleRecording() {
+            if (!isRecording) {
+                await startRecording();
+            } else {
+                stopRecording();
+            }
+        }
+
+        async function startRecording() {
+            if (
+                !navigator.mediaDevices ||
+                !navigator.mediaDevices.getUserMedia
+            ) {
+                showError(
+                    "현재 브라우저에서는 마이크를 사용할 수 없습니다."
+                );
+                return;
+            }
+
+            if (!window.MediaRecorder) {
+                showError(
+                    "현재 브라우저에서는 녹음 기능을 지원하지 않습니다."
+                );
+                return;
+            }
+
+            try {
+                microphoneStream =
+                    await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            channelCount: 1,
+                            echoCancellation: false,
+                            noiseSuppression: false,
+                            autoGainControl: false
+                        }
+                    });
+
+                audioChunks = [];
+                recordingSeconds = 0;
+
+                let recorderOptions = {};
+
+                if (
+                    MediaRecorder.isTypeSupported(
+                        "audio/webm;codecs=opus"
+                    )
+                ) {
+                    recorderOptions = {
+                        mimeType: "audio/webm;codecs=opus"
+                    };
+                }
+
+                mediaRecorder = new MediaRecorder(
+                    microphoneStream,
+                    recorderOptions
+                );
+
+                mediaRecorder.addEventListener(
+                    "dataavailable",
+                    function (event) {
+                        if (event.data.size > 0) {
+                            audioChunks.push(event.data);
+                        }
+                    }
+                );
+
+                mediaRecorder.addEventListener(
+                    "stop",
+                    processRecording,
+                    { once: true }
+                );
+
+                mediaRecorder.start();
+                isRecording = true;
+
+                resultLabel.style.display = "none";
+                result.textContent =
+                    "실제 음성을 녹음하고 있습니다.";
+
+                actions.style.display = "none";
+
+                recordButton.style.display = "inline-block";
+                recordButton.disabled = false;
+                recordButton.textContent = "녹음 중단";
+                recordButton.classList.add("recording");
+                recordButton.classList.remove("processing");
+
+                updateRecordingStatus();
+
+                recordingTimer = setInterval(function () {
+                    recordingSeconds += 1;
+                    updateRecordingStatus();
+
+                    if (
+                        recordingSeconds >=
+                        MAX_RECORDING_SECONDS
+                    ) {
+                        stopRecording();
+                    }
+                }, 1000);
+
+            } catch (error) {
+                console.error(error);
+
+                showError(
+                    "브라우저 주소창에서 마이크 권한을 허용한 뒤 다시 시도해 주세요."
+                );
+            }
+        }
+
+        function updateRecordingStatus() {
+            statusText.textContent =
+                `녹음 중 · ${recordingSeconds}초 / ${MAX_RECORDING_SECONDS}초`;
+        }
+
+        function stopRecording() {
+            if (
+                !mediaRecorder ||
+                mediaRecorder.state === "inactive"
+            ) {
+                return;
+            }
+
+            isRecording = false;
+
+            clearInterval(recordingTimer);
+            recordingTimer = null;
+
+            mediaRecorder.stop();
+
+            if (microphoneStream) {
+                microphoneStream
+                    .getTracks()
+                    .forEach(function (track) {
+                        track.stop();
+                    });
+
+                microphoneStream = null;
+            }
+
+            statusText.textContent =
+                "음성 처리 중";
+
+            resultLabel.style.display = "none";
+
+            result.textContent =
+                "녹음 파일을 변환하고 음성을 인식하고 있습니다...";
+
+            recordButton.disabled = true;
+            recordButton.textContent = "처리 중";
+            recordButton.classList.remove("recording");
+            recordButton.classList.add("processing");
+        }
+
+        async function processRecording() {
+            try {
+                if (audioChunks.length === 0) {
+                    throw new Error(
+                        "녹음된 음성 데이터가 없습니다."
+                    );
+                }
+
+                const recordedBlob = new Blob(
+                    audioChunks,
+                    {
+                        type:
+                            mediaRecorder.mimeType ||
+                            "audio/webm"
+                    }
+                );
+
+                const wavBlob =
+                    await convertTo16kMonoWav(recordedBlob);
+
+                await requestTranscription(wavBlob);
+
+            } catch (error) {
+                console.error(error);
+
+                showError(
+                    error.message ||
+                    "녹음 파일 처리 중 오류가 발생했습니다."
+                );
+            }
+        }
+
+        async function convertTo16kMonoWav(recordedBlob) {
+            const arrayBuffer =
+                await recordedBlob.arrayBuffer();
+
+            const AudioContextClass =
+                window.AudioContext ||
+                window.webkitAudioContext;
+
+            if (!AudioContextClass) {
+                throw new Error(
+                    "브라우저의 오디오 변환 기능을 사용할 수 없습니다."
+                );
+            }
+
+            const audioContext =
+                new AudioContextClass();
+
+            try {
+                const decodedAudio =
+                    await audioContext.decodeAudioData(
+                        arrayBuffer.slice(0)
+                    );
+
+                const frameCount = Math.max(
+                    1,
+                    Math.ceil(
+                        decodedAudio.duration *
+                        TARGET_SAMPLE_RATE
+                    )
+                );
+
+                const offlineContext =
+                    new OfflineAudioContext(
+                        1,
+                        frameCount,
+                        TARGET_SAMPLE_RATE
+                    );
+
+                const source =
+                    offlineContext.createBufferSource();
+
+                source.buffer = decodedAudio;
+                source.connect(offlineContext.destination);
+                source.start(0);
+
+                const renderedAudio =
+                    await offlineContext.startRendering();
+
+                const monoSamples =
+                    renderedAudio.getChannelData(0);
+
+                return encodeWav(
+                    monoSamples,
+                    TARGET_SAMPLE_RATE
+                );
+
+            } finally {
+                await audioContext.close();
+            }
+        }
+
+        function encodeWav(samples, sampleRate) {
+            const bytesPerSample = 2;
+            const dataLength =
+                samples.length * bytesPerSample;
+
+            const buffer =
+                new ArrayBuffer(44 + dataLength);
+
+            const view =
+                new DataView(buffer);
+
+            writeString(view, 0, "RIFF");
+            view.setUint32(
+                4,
+                36 + dataLength,
+                true
+            );
+
+            writeString(view, 8, "WAVE");
+            writeString(view, 12, "fmt ");
+
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
+            view.setUint16(22, 1, true);
+            view.setUint32(24, sampleRate, true);
+
+            view.setUint32(
+                28,
+                sampleRate * bytesPerSample,
+                true
+            );
+
+            view.setUint16(
+                32,
+                bytesPerSample,
+                true
+            );
+
+            view.setUint16(34, 16, true);
+
+            writeString(view, 36, "data");
+            view.setUint32(
+                40,
+                dataLength,
+                true
+            );
+
+            let offset = 44;
+
+            for (let i = 0; i < samples.length; i++) {
+                const sample = Math.max(
+                    -1,
+                    Math.min(1, samples[i])
+                );
+
+                const intSample =
+                    sample < 0
+                        ? sample * 0x8000
+                        : sample * 0x7fff;
+
+                view.setInt16(
+                    offset,
+                    intSample,
+                    true
+                );
+
+                offset += 2;
+            }
+
+            return new Blob(
+                [buffer],
+                { type: "audio/wav" }
+            );
+        }
+
+        function writeString(view, offset, text) {
+            for (let i = 0; i < text.length; i++) {
+                view.setUint8(
+                    offset + i,
+                    text.charCodeAt(i)
+                );
+            }
+        }
+
+        async function requestTranscription(wavBlob) {
+            const formData = new FormData();
+
+            formData.append(
+                "audio",
+                wavBlob,
+                "recorded_audio.wav"
+            );
+
+            const response = await fetch(
+                "/api/transcribe",
+                {
+                    method: "POST",
+                    body: formData
+                }
+            );
+
+            let data;
+
+            try {
+                data = await response.json();
+            } catch (error) {
+                throw new Error(
+                    "서버 응답을 확인할 수 없습니다."
+                );
+            }
+
+            if (!response.ok || !data.success) {
+                throw new Error(
+                    data.error ||
+                    "음성을 인식하지 못했습니다."
+                );
+            }
+
+            showTranscript(data.text);
+        }
+
+        function showTranscript(transcript) {
+            statusText.textContent = "인식 완료";
+
+            resultLabel.textContent =
+                "인식된 문장";
+
+            resultLabel.style.display =
+                "block";
+
+            result.textContent = transcript;
+
+            recordButton.style.display =
+                "none";
+
+            recordButton.disabled = false;
+
+            recordButton.classList.remove(
+                "recording",
+                "processing"
+            );
+
+            actions.style.display = "flex";
+        }
+
+        function showError(message) {
+            isRecording = false;
+
+            clearInterval(recordingTimer);
+            recordingTimer = null;
+
+            if (microphoneStream) {
+                microphoneStream
+                    .getTracks()
+                    .forEach(function (track) {
+                        track.stop();
+                    });
+
+                microphoneStream = null;
+            }
+
+            statusText.textContent = "처리 실패";
+
+            resultLabel.style.display =
+                "none";
+
+            result.textContent = message;
+
+            recordButton.style.display =
+                "none";
+
+            recordButton.disabled = false;
+
+            recordButton.classList.remove(
+                "recording",
+                "processing"
+            );
+
+            actions.style.display = "flex";
+        }
+
+        function resetRecording() {
+            clearInterval(recordingTimer);
+            recordingTimer = null;
+
+            if (
+                mediaRecorder &&
+                mediaRecorder.state !== "inactive"
+            ) {
+                mediaRecorder.stop();
+            }
+
+            if (microphoneStream) {
+                microphoneStream
+                    .getTracks()
+                    .forEach(function (track) {
+                        track.stop();
+                    });
+
+                microphoneStream = null;
+            }
+
+            isRecording = false;
+            mediaRecorder = null;
+            audioChunks = [];
+            recordingSeconds = 0;
+
+            statusText.textContent =
+                "버튼을 눌러 말씀해 주세요";
+
+            resultLabel.style.display =
+                "none";
+
+            result.textContent =
+                "아직 인식된 문장이 없습니다.";
+
+            actions.style.display = "none";
+
+            recordButton.style.display =
+                "inline-block";
+
+            recordButton.textContent =
+                "녹음 시작";
+
+            recordButton.disabled = false;
+
+            recordButton.classList.remove(
+                "recording",
+                "processing"
+            );
+        }
+
+        window.addEventListener(
+            "beforeunload",
+            function () {
+                clearInterval(recordingTimer);
+
+                if (microphoneStream) {
+                    microphoneStream
+                        .getTracks()
+                        .forEach(function (track) {
+                            track.stop();
+                        });
+                }
+            }
+        );
+    </script>
+</body>
+</html>
