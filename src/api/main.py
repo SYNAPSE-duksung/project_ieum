@@ -12,9 +12,12 @@ from fastapi import (
     HTTPException,
     UploadFile,
 )
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from src.api.model_loader import ModelLoader
 from src.asr.inference import ASRInference
+from src.tts.piper_tts import synthesize_text_to_speech
 
 
 # ============================================================
@@ -48,6 +51,14 @@ model_loader = ModelLoader(
 )
 
 asr_inference: ASRInference | None = None
+
+
+# ============================================================
+# TTS request model
+# ============================================================
+
+class TTSRequest(BaseModel):
+    text: str
 
 
 # ============================================================
@@ -181,12 +192,12 @@ async def lifespan(app: FastAPI):
 # ============================================================
 
 app = FastAPI(
-    title="IEUM ASR API",
+    title="IEUM Personalized ASR + TTS API",
     description=(
         "구음장애 범용 및 개인화 "
-        "음성인식 모델 추론을 위한 FastAPI 서버"
+        "음성인식 모델 추론과 Piper TTS를 위한 FastAPI 서버"
     ),
-    version="0.3.0",
+    version="0.4.0",
     lifespan=lifespan,
 )
 
@@ -199,7 +210,7 @@ app = FastAPI(
 def root():
 
     return {
-        "service": "IEUM ASR API",
+        "service": "IEUM Personalized ASR + TTS API",
         "status": "running",
         "general_model": (
             "Whisper Small Last4 + BiGRU CTC"
@@ -478,3 +489,56 @@ async def transcribe_personalized(
         "filename": audio.filename,
         "text": text,
     }
+
+
+# ============================================================
+# Text to Speech
+# ============================================================
+
+@app.post("/tts")
+async def synthesize_tts(
+    request: TTSRequest,
+):
+    """
+    입력된 텍스트를 Piper TTS로 변환하고
+    생성된 WAV 파일을 반환한다.
+    """
+
+    if not request.text.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="TTS text is empty.",
+        )
+
+    try:
+
+        output_path = (
+            synthesize_text_to_speech(
+                request.text
+            )
+        )
+
+        return FileResponse(
+            path=output_path,
+            media_type="audio/wav",
+            filename=output_path.name,
+        )
+
+    except Exception as error:
+
+        print()
+        print("=" * 70)
+        print("TTS 생성 중 오류 발생")
+        print("=" * 70)
+
+        traceback.print_exc()
+
+        print("=" * 70)
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "TTS synthesis failed: "
+                f"{type(error).__name__}: {error}"
+            ),
+        )

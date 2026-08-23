@@ -1,3 +1,4 @@
+# ASR training and inference
 PyYAML==6.0.3
 pandas
 torch
@@ -6,9 +7,21 @@ transformers
 jiwer
 soundfile
 tqdm
+numpy
+scipy
+
+# FastAPI server and HTTP client
 fastapi
 uvicorn
 python-multipart
 requests
+
+# Raspberry Pi audio and GPIO
 sounddevice
-numpy
+gpiozero
+
+# yeonsoo_dev backend
+openai-whisper==20250625
+google-generativeai==0.8.6
+python-dotenv==1.2.2
+ffmpeg-python==0.2.0
