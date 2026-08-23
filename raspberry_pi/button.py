@@ -50,11 +50,13 @@ class ButtonController:
         self.record_button = Button(
             self.record_pin,
             pull_up=True,
+            bounce_time=0.1,
         )
 
         self.tts_button = Button(
             self.tts_pin,
             pull_up=True,
+            bounce_time=0.1,
         )
 
         self.record_button.when_pressed = (

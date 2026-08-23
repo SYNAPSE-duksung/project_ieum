@@ -337,11 +337,25 @@ class DeviceController:
 
 
 if __name__ == "__main__":
+    from signal import pause
 
     controller = DeviceController(
         server_url="http://127.0.0.1:8000",
         test_audio_path="test_input_16k.wav",
-        simulate_buttons=True,
+        simulate_buttons=False,
     )
 
-    controller.run_simulation()
+    print("=" * 60)
+    print("IEUM Raspberry Pi Controller")
+    print("=" * 60)
+    print("녹음 버튼     : GPIO 17")
+    print("읽어주기 버튼 : GPIO 27")
+    print("버튼 입력 대기 중...")
+    print("종료: Ctrl+C")
+
+    try:
+        pause()
+
+    except KeyboardInterrupt:
+        print()
+        print("IEUM Controller 종료")
