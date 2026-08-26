@@ -1,0 +1,13 @@
+{
+  "speaker_id": "SKY_M_24",
+  "mode": "error_profile",
+  "best_epoch": 15,
+  "best_valid_cer": 0.18661417322834645,
+  "test_loss": 1.0590189611539245,
+  "test_cer": 0.161231884057971,
+  "test_wer": 0.43790849673202614,
+  "min_count": 5,
+  "min_ratio": 0.2,
+  "alpha": 0.5,
+  "max_weight": null
+}

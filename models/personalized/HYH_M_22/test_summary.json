@@ -1,0 +1,13 @@
+{
+  "speaker_id": "HYH_M_22",
+  "mode": "error_profile",
+  "best_epoch": 7,
+  "best_valid_cer": 0.030642750373692077,
+  "test_loss": 0.5722531200652676,
+  "test_cer": 0.11354492624050067,
+  "test_wer": 0.31703470031545744,
+  "min_count": 5,
+  "min_ratio": 0.2,
+  "alpha": 0.5,
+  "max_weight": null
+}

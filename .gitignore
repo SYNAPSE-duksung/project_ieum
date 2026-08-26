@@ -1,72 +1,52 @@
-# ==========================
-# Python
-# ==========================
+# Data and model artifacts
+outputs/
+checkpoints/
+logs/
+models/**/*.pt
+*.pth
+piper/*.onnx
+piper/*.onnx.json
 
+# Generated audio files
+*.wav
+*.m4a
+*.mp3
+*.flac
+
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
+.ipynb_checkpoints/
 
-
-# ==========================
-# Virtual Environment
-# ==========================
-
+# Virtual environments
 venv/
 .venv/
 env/
 
-
-# ==========================
-# Environment Variables
-# ==========================
-
+# Environment variables
 .env
 backend/.env
 
-
-# ==========================
-# Uploaded Audio Files
-# ==========================
-
+# Uploaded audio files
 backend/uploads/
 uploads/
 
-
-# ==========================
-# Python Cache
-# ==========================
-
+# Test, type-check, and coverage caches
 .pytest_cache/
 .mypy_cache/
 .coverage
 htmlcov/
 
-
-# ==========================
-# VS Code
-# ==========================
-
-.vscode/
-
-
-# ==========================
-# OS Files
-# ==========================
-
-.DS_Store
-Thumbs.db
-
-
-# ==========================
-# Log Files
-# ==========================
-
+# Logs and temporary files
 *.log
-
-
-# ==========================
-# Temporary Files
-# ==========================
-
 *.tmp
 *.bak
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db

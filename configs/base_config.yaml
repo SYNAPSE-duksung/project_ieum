@@ -1,0 +1,97 @@
+# ============================================================
+# IEUM ASR 기본 실험 설정
+# ============================================================
+
+project:
+  name: "ieum_asr"
+  seed: 42
+
+data:
+  project_root: "/content/drive/MyDrive/ieum_project"
+
+  alignment_csv: "05_outputs/alignment/word_alignment_final_with_metadata.csv"
+  audio_root: "06_preprocessed_audio"
+
+  audio_filename_column: "parent_wav"
+  audio_path_column: "parent_wav_path"
+
+  segment_id_column: "segment_id"
+  transcript_column: "segment_text"
+  word_column: "word"
+
+  split_column: "split"
+  speaker_column: "speaker_id"
+
+  segment_start_column: "start_sec"
+  segment_end_column: "end_sec"
+
+  abnormal_duration_column: "abnormal_duration"
+
+  sample_rate: 16000
+
+  min_chunk_seconds: 0.1
+  max_audio_seconds: 30.0
+
+  num_workers: 2
+
+
+whisper:
+  model_name: "openai/whisper-small"
+
+
+tokenizer:
+  unit: "character"
+  vocab_path: "outputs/vocab.json"
+
+
+model:
+  architecture: "linear_ctc"
+
+  dropout: 0.1
+
+  bigru:
+    hidden_size: 512
+    num_layers: 2
+
+  transformer:
+    hidden_size: 512
+    num_layers: 4
+    num_heads: 8
+    feedforward_size: 2048
+
+  conformer:
+    hidden_size: 512
+    num_layers: 4
+    num_heads: 8
+    feedforward_size: 2048
+    convolution_kernel_size: 31
+
+
+encoder:
+  train_mode: "freeze"
+
+
+training:
+  batch_size: 4
+
+  # 4개 구조 비교용 최대 epoch
+  epochs: 10
+
+  learning_rate: 0.0001
+  weight_decay: 0.01
+
+  use_amp: true
+
+  early_stopping_patience: 3
+
+  # Encoder가 freeze일 때만 사용
+  use_feature_cache: true
+
+  # Colab 로컬 SSD에 저장
+  # 런타임이 종료되면 없어져도 괜찮음.
+  feature_cache_root: "/content/drive/MyDrive/ieum_project/feature_cache"
+
+
+output:
+  root_dir: "outputs"
+  checkpoint_root: "checkpoints"

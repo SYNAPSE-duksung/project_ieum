@@ -1,12 +1,27 @@
-fastapi==0.138.1
-uvicorn==0.49.0
-python-multipart==0.0.32
+# ASR training and inference
+PyYAML==6.0.3
+pandas
+torch
+torchaudio
+transformers
+jiwer
+soundfile
+tqdm
+numpy
+scipy
 
+# FastAPI server and HTTP client
+fastapi
+uvicorn
+python-multipart
+requests
+
+# Raspberry Pi audio and GPIO
+sounddevice
+gpiozero
+
+# yeonsoo_dev backend
 openai-whisper==20250625
-torch==2.12.1
-
 google-generativeai==0.8.6
 python-dotenv==1.2.2
-
-numpy==2.4.6
 ffmpeg-python==0.2.0
