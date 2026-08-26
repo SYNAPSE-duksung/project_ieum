@@ -73,7 +73,7 @@
 
 또한 구음장애 음성은 같은 장애 유형에서도 화자에 따라 발음 특성과 반복적으로 나타나는 오류 패턴이 다르기 때문에, 하나의 범용 음성 인식 모델만으로 모든 화자의 특성을 충분히 반영하기 어렵습니다.
 
-**이음(IEUM)**은 이러한 문제를 개선하기 위해 구음장애 음성에 적응한 **범용 ASR 모델**을 구축하고, 화자별로 반복되는 인식 오류를 분석한 **Error Profile 기반 개인화 ASR 모델**로 확장했습니다.
+이러한 문제를 개선하기 위해 구음장애 음성에 적응한 **범용 ASR 모델**을 구축하고, 화자별로 반복되는 인식 오류를 분석한 **Error Profile 기반 개인화 ASR 모델**로 확장했습니다.
 
 최종적으로 Raspberry Pi 기반 하드웨어와 FastAPI 추론 서버를 연결하여 다음 과정을 하나의 End-to-End 시스템으로 구현했습니다.
 
@@ -84,14 +84,33 @@
 ## System Architecture
 
 <p align="center">
-  <img src="assets/architecture/system_architecture.png" width="850">
+  <img src="assets/architecture/system_architecture.png" width="900">
 </p>
 
-Raspberry Pi는 USB 마이크와 GPIO 버튼을 이용해 사용자의 음성을 녹음하고 FastAPI 서버로 전달합니다.
+이음은 **모델 개발 및 학습 환경, AI 추론 서버, Raspberry Pi 기반 하드웨어 클라이언트**의 세 영역으로 구성됩니다.
 
-FastAPI 서버에서는 범용 ASR과 해당 화자의 개인화 ASR 모델을 이용해 음성을 인식하며, 두 모델의 결과를 Raspberry Pi 디스플레이에서 비교할 수 있습니다.
+### 1. Developent & Training
 
-사용자가 개인화 모델의 결과를 선택하면 Piper TTS를 통해 다시 음성으로 변환하고 Bluetooth 스피커로 출력합니다.
+구음장애 ASR 모델은 **Python과 PyTorch**를 기반으로 개발하며, 학습은 **Google Colab** 환경에서 수행합니다.  
+학습된 범용 및 개인화 ASR 모델은 추론 서버에서 사용할 수 있도록 저장하여 실제 서비스 파이프라인과 연결합니다.
+
+### 2. AI Inference Server
+
+**FastAPI** 기반 서버에서 학습된 ASR 모델과 Piper TTS를 실행합니다.
+
+Raspberry Pi로부터 WAV 음성을 HTTP Request로 전달받으면 **범용 ASR과 화자별 개인화 ASR**을 통해 음성을 텍스트로 변환합니다.
+
+인식된 문장은 클라이언트로 전달되며, 사용자가 음성 출력을 선택하면 **Piper TTS**를 통해 음성을 생성하여 Raspberry Pi로 반환합니다.
+
+### 3. Hardware Client
+
+하드웨어 클라이언트는 **Raspberry Pi, USB 마이크, 디스플레이, Bluetooth 스피커**로 구성됩니다.
+
+사용자가 GPIO 버튼을 누르면 마이크를 통해 음성을 녹음하고, 녹음된 WAV 파일을 FastAPI 서버로 전송합니다. 서버에서 반환된 범용·개인화 ASR 결과는 디스플레이에 표시되며, TTS로 생성된 음성은 Bluetooth 스피커를 통해 출력됩니다.
+
+### End-to-End Flow
+
+**사용자 발화 → Raspberry Pi 음성 녹음 → FastAPI 서버 전송 → 범용·개인화 ASR 추론 → 인식 결과 표시 → Piper TTS → Bluetooth 스피커 출력**
 
 <br>
 
