@@ -6,7 +6,7 @@
 
 <br>
 
-## 📌 Project Information
+## Project Information
 
 * **소속**: 덕성여자대학교 인공지능 동아리 **시냅스(SYNAPSE)**
 * **개발 과정**
@@ -16,7 +16,7 @@
 
 <br>
 
-## 👥 Team
+## Team
 
 <table>
   <tr>
@@ -67,7 +67,7 @@
 
 <br>
 
-## 🔎 Overview
+## Overview
 
 일반적인 음성 인식 모델은 정상 발화 데이터를 중심으로 학습되어 있어 **구음장애 화자의 비정형적인 발음과 화자별 발화 특성을 정확하게 인식하는 데 한계**가 있습니다.
 
@@ -81,7 +81,7 @@
 
 <br>
 
-## 🏗️ System Architecture
+## System Architecture
 
 <p align="center">
   <img src="assets/architecture/system_architecture.png" width="850">
@@ -95,7 +95,7 @@ FastAPI 서버에서는 범용 ASR과 해당 화자의 개인화 ASR 모델을 �
 
 <br>
 
-## 🤖 ASR Model
+## ASR Model
 
 ### General ASR Model
 
@@ -154,7 +154,7 @@ Error Profile에는 화자에게 반복적으로 나타나는 오류 패턴을 �
 
 <br>
 
-## 🖥️ Demo
+## Demo
 
 실제 시스템에서는 Raspberry Pi 디스플레이를 통해 녹음 상태와 범용·개인화 모델의 인식 결과를 확인할 수 있습니다.
 
@@ -172,7 +172,7 @@ Error Profile에는 화자에게 반복적으로 나타나는 오류 패턴을 �
 
 <br>
 
-## 📁 Project Structure
+## Project Structure
 
 ```text
 ieum_asr/
@@ -207,7 +207,7 @@ ieum_asr/
 
 <br>
 
-## 🚀 Getting Started
+## Getting Started
 
 ### 1. FastAPI Server
 
@@ -235,7 +235,7 @@ PYTHONPATH=/usr/lib/python3/dist-packages python -m raspberry_pi.device_controll
 
 <br>
 
-## 🎬 Demo Flow
+## Demo Flow
 
 1. **GPIO18 버튼**을 눌러 녹음을 시작합니다.
 2. 구음장애 화자의 음성을 USB 마이크로 입력합니다.
@@ -272,20 +272,31 @@ Bluetooth 스피커 출력
 
 <br>
 
-## 🛠 Tech Stack
+## Tech Stack
 
-**AI / Speech**
+### AI / Speech
 
-`Python` · `PyTorch` · `Whisper` · `BiGRU` · `CTC`
+![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)
+![Whisper](https://img.shields.io/badge/Whisper-412991?style=for-the-badge&logo=openai&logoColor=white)
+![BiGRU](https://img.shields.io/badge/BiGRU-013243?style=for-the-badge)
+![CTC](https://img.shields.io/badge/CTC-4B8BBE?style=for-the-badge)
 
-**Backend**
+### Backend / TTS
 
-`FastAPI` · `Uvicorn`
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
+![Uvicorn](https://img.shields.io/badge/Uvicorn-499848?style=for-the-badge)
+![Piper TTS](https://img.shields.io/badge/Piper_TTS-7A5AF8?style=for-the-badge)
 
-**Hardware**
+### Hardware
 
-`Raspberry Pi` · `GPIO` · `USB Microphone` · `Bluetooth Speaker`
+![Raspberry Pi](https://img.shields.io/badge/Raspberry_Pi-A22846?style=for-the-badge&logo=raspberrypi&logoColor=white)
+![GPIO](https://img.shields.io/badge/GPIO-6CC04A?style=for-the-badge)
+![USB Microphone](https://img.shields.io/badge/USB_Microphone-555555?style=for-the-badge)
+![Bluetooth](https://img.shields.io/badge/Bluetooth-0082FC?style=for-the-badge&logo=bluetooth&logoColor=white)
 
-**TTS**
+### Development
 
-`Piper TTS`
+![Visual Studio Code](https://img.shields.io/badge/Visual_Studio_Code-007ACC?style=for-the-badge&logo=visualstudiocode&logoColor=white)
+![Git](https://img.shields.io/badge/Git-F05032?style=for-the-badge&logo=git&logoColor=white)
+![GitHub](https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white)
