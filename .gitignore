@@ -4,4 +4,71 @@ outputs/
 *.pth
 *.wav
 *.mp3
+*.log# =========================
+# Research data / outputs
+# =========================
+data/
+results/
+
+# =========================
+# Credentials / secrets
+# =========================
+credentials/
+*.token
+*token*.json
+*client_secret*.json
+*credentials*.json
+
+# =========================
+# Python environments
+# =========================
+.venv/
+.venv_smoke/
+venv/
+__pycache__/
+*.py[cod]
+
+# =========================
+# Large research files
+# =========================
+*.wav
+*.mp3
+*.flac
+*.zip
+*.tar
+*.7z
+
+# =========================
+# Jupyter / IDE / OS
+# =========================
+.ipynb_checkpoints/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# =========================
+# Temporary files
+# =========================
+*.tmp
 *.log
+
+# =========================
+# Local inspection / evidence files
+# =========================
+scripts/**/sample_*.json
+scripts/**/json_samples/
+scripts/**/*audit*.json
+scripts/**/*inventory*.json
+scripts/**/*verified_files*.json
+scripts/**/drive_listing_snapshot.json
+scripts/**/unresolved_investigation_evidence/
+
+# Local metadata copies
+scripts/**/all_metadata_drive.csv
+
+# External reference repository copies
+scripts/03_preprocessing_pilot/reference_code/
+
+# Old / backup scripts
+scripts/**/*.before_*.py
