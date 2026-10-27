@@ -1,4 +1,4 @@
-"""Plan or run ONE capacity-limited Candidate 2 batch.
+"""Plan or run ONE capacity-limited Candidate 2 batch from local files by default.
 
 Preparation: --make-plan. Read-only verification: --batch-id BATCH_001 --dry-run.
 Real downloads/VAD require explicit --execute. No automatic source deletion.
@@ -25,7 +25,7 @@ import wave
 from collections import Counter, defaultdict
 from pathlib import Path
 
-ROOT=Path('C:/ieum')
+ROOT=Path(__file__).resolve().parents[2]
 CORE=ROOT/'scripts/03_preprocessing_pilot/05_run_preprocessing_pilot15.py'
 CORE_SHA='a79154da1fa27c5c5a2f29dbb76d9eabaa9d95e3b77566f547b24bd4cce53aef'
 GB=10**9
@@ -33,7 +33,9 @@ RESERVE=100*GB
 CORE_FUNCTIONS=('vad_segment_by_energy','split_transcript','clean_transcript','save_pass','process_recording')
 LOCK_HANDLES=[]
 DRIVE_SESSION=None
-DOWNLOAD_BACKEND="gdown"
+DOWNLOAD_BACKEND="local"
+SOURCE_LAYOUT='speaker'
+SOURCE_FOLDERS={}
 DRIVE_SCOPE="https://www.googleapis.com/auth/drive.readonly"
 
 
@@ -48,6 +50,35 @@ def digest(path):
         for b in iter(lambda:f.read(8*1024*1024),b''):
             h.update(b)
     return h.hexdigest()
+
+
+def frame_aligned_audio_class(audio_class):
+    """Ignore incomplete trailing PCM bytes while preserving every full sample.
+
+    Some source WAV data chunks have an odd byte count for 16-bit PCM.
+    Keep source files and the pinned VAD unchanged; record any repair in logs.
+    """
+    class FrameAlignedAudio:
+        @staticmethod
+        def from_wav(path):
+            audio = audio_class.from_wav(path)
+            remainder = len(audio.raw_data) % audio.frame_width
+            if remainder:
+                with wave.open(str(path), 'rb') as source:
+                    pcm = source.readframes(source.getnframes())
+                    if len(pcm) % audio.frame_width or pcm != audio.raw_data[:-remainder]:
+                        raise ValueError('Malformed WAV differs from complete PCM frames')
+                print(f'WAV frame repair: {Path(path).name}; ignored trailing bytes={remainder}; full PCM frames preserved; source unchanged', flush=True)
+                audio = audio._spawn(pcm)
+            return audio
+
+        @staticmethod
+        def from_file(path):
+            if Path(path).suffix.lower() == '.wav':
+                return FrameAlignedAudio.from_wav(path)
+            return audio_class.from_file(path)
+
+    return FrameAlignedAudio
 
 
 def new_json(path,data):
@@ -210,7 +241,34 @@ def make_plan(args):
 
 
 def paths_for(row,base):
-    return {k:(base/row['speaker_id']/row[k+'_filename']).resolve() for k in ['wav','json']}
+    paths = {}
+    for kind in ('wav', 'json'):
+        explicit = row.get('local_'+kind+'_path') or row.get(kind+'_path')
+        if explicit:
+            path = Path(explicit)
+        elif SOURCE_LAYOUT=='drive-path':
+            relative = Path(row[kind+'_drive_path'])
+            if relative.is_absolute() or '..' in relative.parts or len(relative.parts)<2:
+                raise ValueError('Unsafe manifest Drive path')
+            prefix=relative.parts[0]
+            cache_key=(str(base.resolve()),prefix)
+            if cache_key not in SOURCE_FOLDERS:
+                matches=[p for p in base.iterdir() if p.is_dir() and
+                         (p.name==prefix or p.name.startswith(prefix+'_')) and
+                         p.name != prefix+'_wav_16k']
+                if len(matches)!=1:
+                    raise ValueError('Expected one local source folder for '+prefix)
+                SOURCE_FOLDERS[cache_key]=matches[0]
+            path=SOURCE_FOLDERS[cache_key].joinpath(*relative.parts[1:])
+        else:
+            path = Path(row['speaker_id'])/row[kind+'_filename']
+        if not path.is_absolute():
+            path = base/path
+        path = path.resolve()
+        if not path.is_relative_to(base.resolve()):
+            raise ValueError('Source path outside input root: '+str(path))
+        paths[kind] = path
+    return paths
 
 
 def pair_adapter(row,manifest):
@@ -264,17 +322,21 @@ def verify_artifacts(result,core_output):
     return usable
 
 
-def check_space(rows,base,pending_output):
+def check_space(rows,base,pending_output,inspect_sources=True):
     missing=0
-    for r in rows:
+    if not inspect_sources and DOWNLOAD_BACKEND != 'local':
+        raise ValueError('Source inspection can only be skipped for validated local inputs')
+    for r in (rows if inspect_sources else []):
         for kind,path in paths_for(r,base).items():
             if path.exists():
                 if not path.is_file() or path.stat().st_size!=int(r[kind+'_size_bytes']):
                     raise ValueError('Existing source size mismatch; will not overwrite '+str(path))
             else:
+                if DOWNLOAD_BACKEND=='local':
+                    raise ValueError('Missing local source: '+str(path))
                 missing+=int(r[kind+'_size_bytes'])
-    drives={Path(ROOT.anchor)}
-    for root in [base,pending_output]:
+    drives={Path(pending_output.anchor)}
+    for root in ([] if DOWNLOAD_BACKEND=='local' else [base]):
         drives.add(Path(root.anchor))
     required=missing+output_bound(rows)+RESERVE
     free={str(d):shutil.disk_usage(d).free for d in drives}
@@ -419,19 +481,28 @@ def download_drive_api(row,kind,path):
 
 
 def download(row,kind,path):
+    if DOWNLOAD_BACKEND=='local':
+        if not path.is_file() or path.stat().st_size!=int(row[kind+'_size_bytes']):
+            raise ValueError('Missing/invalid local source: '+str(path))
+        return
     if DOWNLOAD_BACKEND=='drive-api':
         return download_drive_api(row,kind,path)
     return download_gdown(row,kind,path)
 
 
 def batch_run(args):
+    global DOWNLOAD_BACKEND,DRIVE_SESSION,SOURCE_LAYOUT
+    DOWNLOAD_BACKEND=args.download_backend
+    SOURCE_LAYOUT=getattr(args,'source_layout','speaker') if DOWNLOAD_BACKEND=='local' else 'speaker'
+    if DOWNLOAD_BACKEND=='local' and not args.input_root:
+        raise ValueError('Local mode requires --input-root')
     if not args.batch_id or not args.batch_id.startswith('BATCH_'):
         raise ValueError('Choose one numeric planned batch; pilot/oversized groups cannot execute')
     allrows=read(args.plan);checked_rows(allrows)
     rows=[r for r in allrows if r['batch_id']==args.batch_id]
     if not rows or any(r['planning_status']!='PLANNED' for r in rows) or source_size(rows)>50*GB:
         raise ValueError('Unknown/nonplanned/oversized batch')
-    base=(args.download_dir/args.batch_id).resolve();out=(args.output_dir/args.batch_id).resolve()
+    base=(args.input_root if args.download_backend=='local' else args.download_dir/args.batch_id).resolve();out=(args.output_dir/args.batch_id).resolve()
     protected=[ROOT/'data/pilot_15_inputs',ROOT/'data/smoke_test_inputs',ROOT/'results/preprocessing_pilot']
     if base==out or base.is_relative_to(out) or out.is_relative_to(base) or base in (ROOT,ROOT/'data') or out in (ROOT,ROOT/'results'):
         raise ValueError('Use separate dedicated batch input/output roots')
@@ -494,11 +565,14 @@ def batch_run(args):
         print(json.dumps(report,ensure_ascii=False,indent=2));return
     if not args.execute:
         raise ValueError('Real run requires --execute; use --dry-run for preparation')
-    global DOWNLOAD_BACKEND,DRIVE_SESSION
-    DOWNLOAD_BACKEND=args.download_backend
+    summary=out/'batch_summary.json'
+    if not pending and summary.is_file():
+        state=json.loads(summary.read_text(encoding='utf-8'))
+        if state['status']=='COMPLETE' and digest(Path(state['results_csv']))==state['results_sha256']:
+            return state
     if DOWNLOAD_BACKEND=="drive-api":
         DRIVE_SESSION=drive_session(args.drive_token)
-    else:
+    elif DOWNLOAD_BACKEND=='gdown':
         import gdown
     from pydub import AudioSegment
     out.mkdir(parents=True,exist_ok=True)
@@ -506,30 +580,48 @@ def batch_run(args):
     run=uuid.uuid4().hex
     core.LOG.setLevel(logging.INFO);core.LOG.addHandler(logging.StreamHandler(sys.stdout))
     core.pair_inputs=pair_adapter
+    prefetch=None
+    if DOWNLOAD_BACKEND=='local' and getattr(args,'staging_dir',None):
+        sys.path.insert(0,str(Path(__file__).parent))
+        from local_prefetch import LocalPrefetch
+        prefetch=LocalPrefetch(pending,base,args.staging_dir,__import__('types').SimpleNamespace(paths_for=paths_for,download=download,RESERVE=RESERVE))
     for index,r in enumerate(pending,1):
         # Account again for accumulating retained output before each recording.
         rec=out/'records'/r['recording_id'];rec.mkdir(parents=True,exist_ok=True)
         attempts=list(rec.glob('attempt_*'));attempt=rec/f'attempt_{len(attempts)+1:04d}'
         attempt.mkdir(exist_ok=False);coreout=attempt/'core';coreout.mkdir()
         u=[];result=core.make_result(r)
+        prefetch_ready=False
         try:
-            check_space(pending[index-1:],base,out)
-            local=paths_for(r,base)
-            for kind,path in local.items():
-                if not path.is_relative_to(base):raise ValueError('Unsafe input path')
-                download(r,kind,path)
+            check_started=time.perf_counter()
+            check_space(pending[index-1:],base,out,inspect_sources=DOWNLOAD_BACKEND!='local')
+            check_elapsed=time.perf_counter()-check_started
+            print(f'Space check: {check_elapsed:.3f}s; source inspection=current recording only' if DOWNLOAD_BACKEND=='local' else f'Space/source check: {check_elapsed:.3f}s',flush=True)
+            if prefetch:
+                local,stage_seconds,wait_seconds=prefetch.take(index-1)
+                prefetch_ready=True
+                print(f'Prefetch: staged={stage_seconds:.3f}s; wait={wait_seconds:.3f}s',flush=True)
+            else:
+                local=paths_for(r,base)
+                for kind,path in local.items():
+                    if not path.is_relative_to(base):raise ValueError('Unsafe input path')
+                    download(r,kind,path)
             inputrow=dict(r,wav_path=str(local['wav']),json_path=str(local['json']))
             pair_adapter(inputrow,args.plan)
             print(f'[{index}/{len(pending)}] {r["speaker_id"]}: {r["recording_id"]}',flush=True)
-            result=core.process_recording(inputrow,args.plan,coreout,AudioSegment,index)
+            result=core.process_recording(inputrow,args.plan,coreout,frame_aligned_audio_class(AudioSegment),index)
             u=verify_artifacts(result,coreout)
         except Exception as exc:
+            if prefetch and not prefetch_ready:
+                prefetch.close()
+                raise ValueError(f'Prefetch failed for {r["recording_id"]}: {type(exc).__name__}: {exc}; stopping safely before processing remaining recordings') from exc
             result['final_status']='ERROR';result['failure_reason']=type(exc).__name__+': '+str(exc)
             print('Recording ERROR:',result['failure_reason'],flush=True)
         result.update(download_backend=args.download_backend,batch_id=args.batch_id,source_manifest_sha256=candidate_sha,core_sha256=CORE_SHA,
                       batch_pairing_adapter='explicit physical filenames + canonical JSON File_id + Patient_info; no fuzzy matching')
         new_json(attempt/'result.json',dict(result=result,core_output=str(coreout),usable_artifacts=u))
         outcomes.append(result);usable+=u
+    if prefetch:prefetch.close()
     counts=Counter(r['final_status'] for r in outcomes)
     complete=len(outcomes)==len(rows) and counts['ERROR']==0
     resultfile=out/f'preprocessing_results_{run}.csv';new_csv(resultfile,outcomes)
@@ -539,13 +631,16 @@ def batch_run(args):
     state=dict(batch_id=args.batch_id,status='COMPLETE' if complete else 'FAILED',cleanup_ready=complete,
                recording_count=len(outcomes),status_counts=dict(counts),results_csv=str(resultfile),
                results_sha256=digest(resultfile),SUCCESS_artifacts_verified=complete,
-               usable_segment_count=len(usable),source_directory=str(base),core_sha256=CORE_SHA,
+               usable_segment_count=len(usable),usable_csv=str(usablefile),source_directory=str(base),core_sha256=CORE_SHA,
                source_cleanup_performed=False,cleanup_policy='Only explicit user cleanup after COMPLETE/result/artifact verification; runner never deletes sources')
     state['speaker_outcomes']={s:dict(Counter(r['final_status'] for r in outcomes if r['speaker_id']==s)) for s in sorted({r['speaker_id'] for r in outcomes})}
     state['disability_group_outcomes']={g:dict(Counter(r['final_status'] for r in outcomes if r['disability_group']==g)) for g in sorted({r['disability_group'] for r in outcomes})}
     new_json(out/f'batch_summary_{run}.json',state)
     if complete and not (out/'batch_summary.json').exists():new_json(out/'batch_summary.json',state)
     print(json.dumps(state,ensure_ascii=False,indent=2))
+    if not complete:
+        raise ValueError('Batch contains recording errors; next batch must not run')
+    return state
 
 
 def self_test():
@@ -554,6 +649,8 @@ def self_test():
     from unittest.mock import patch
     from types import SimpleNamespace
     core,evidence=core_module()
+    global DOWNLOAD_BACKEND
+    DOWNLOAD_BACKEND='gdown'
     fixture=[dict(speaker_id='SYNTHETIC_CHECK',wav_filename='a.wav',json_filename='a.json',
                   wav_size_bytes='10',json_size_bytes='10',duration_sec='1')]
     with patch.object(shutil,'disk_usage',return_value=SimpleNamespace(free=RESERVE+20+output_bound(fixture)-1)):
@@ -584,7 +681,7 @@ def self_test():
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--download-backend',choices=['gdown','drive-api'],default='gdown')
+    p.add_argument('--download-backend',choices=['local','gdown','drive-api'],default='local')
     p.add_argument('--drive-token',type=Path,help='User-authorized OAuth token; never printed or overwritten')
     p.add_argument('--drive-client-secrets',type=Path,help='Desktop OAuth client JSON; only used with --authorize-drive')
     p.add_argument('--authorize-drive',action='store_true',help='User-operated browser OAuth only; no batch execution')
@@ -592,6 +689,8 @@ def main():
     p.add_argument('--candidate',type=Path,default=ROOT/'results/full_expansion/candidate_exclude_all_code_overlap_resolved.csv')
     p.add_argument('--plan',type=Path,default=ROOT/'results/full_expansion/candidate2_batch_plan.csv')
     p.add_argument('--batch-id')
+    p.add_argument('--input-root',type=Path,help='Local source root: speaker_id/filename, or explicit local_wav_path/local_json_path in plan')
+    p.add_argument('--source-layout',choices=['speaker','drive-path'],default='speaker',help='drive-path maps VS01/... to VS01 or VS01_* folder under input root')
     p.add_argument('--download-dir',type=Path,default=ROOT/'data/candidate2_batch_inputs')
     p.add_argument('--output-dir',type=Path,default=ROOT/'results/candidate2_batch_preprocessing')
     p.add_argument('--max-source-gb',type=float,default=40,help='<=50 GB; default 40 because conservative two-pass export peak at 50GB exceeds the stated 279GB free minus 100GB reserve')

@@ -72,3 +72,5 @@ scripts/03_preprocessing_pilot/reference_code/
 
 # Old / backup scripts
 scripts/**/*.before_*.py
+
+.venv_local_pilot/
