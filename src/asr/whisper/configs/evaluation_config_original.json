@@ -1,0 +1,33 @@
+﻿{
+    "experiment":  "whisper_small_full_v1",
+    "model_id":  "openai/whisper-small",
+    "manifest_csv":  "data/manifests/manifest_v1/all_utterances.csv",
+    "train_split":  "train",
+    "validation_split":  "validation",
+    "audio_root":  "data/processed_candidate2",
+    "output_root":  "results/whisper_small_full_v1",
+    "train_samples":  180692,
+    "validation_samples":  33391,
+    "learning_rate":  1E-05,
+    "epochs":  1,
+    "micro_batch_size":  4,
+    "gradient_accumulation_steps":  4,
+    "effective_batch_size":  16,
+    "optimizer":  "adamw_fused",
+    "weight_decay":  0.01,
+    "scheduler":  "linear",
+    "warmup_ratio":  0.05,
+    "max_grad_norm":  1.0,
+    "precision":  "bf16",
+    "attention_implementation":  "sdpa",
+    "gradient_checkpointing":  false,
+    "seed":  42,
+    "steps_per_epoch":  11294,
+    "total_optimizer_steps":  11294,
+    "checkpoint_every_steps":  1000,
+    "evaluation":  {
+                       "metric":  "cer",
+                       "group_metrics":  true,
+                       "use_test_during_training":  false
+                   }
+}

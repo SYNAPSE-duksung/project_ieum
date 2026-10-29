@@ -1,0 +1,27 @@
+{
+  "experiment": "whisper_small_earlystop_test_v1",
+  "model": "openai/whisper-small",
+  "training": false,
+  "split": "test",
+  "samples": 46834,
+  "test": {
+    "cer": 10.140017375621861,
+    "wer": 11.959818043972707,
+    "macro_group_cer": 7.9594117554003985,
+    "group_metrics": {
+      "뇌신경장애": {
+        "cer": 4.953029195027282,
+        "wer": 7.084095063985375
+      },
+      "언어·청각 장애": {
+        "cer": 6.67302526229207,
+        "wer": 8.51688330907925
+      },
+      "후두장애": {
+        "cer": 12.25218080888184,
+        "wer": 13.906069267462646
+      }
+    }
+  },
+  "elapsed_minutes": 53.722609676669045
+}

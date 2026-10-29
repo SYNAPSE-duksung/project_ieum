@@ -1,0 +1,56 @@
+﻿{
+    "experiment":  "whisper_small_earlystop_v1",
+    "model_id":  "openai/whisper-small",
+    "initialization":  "pretrained_base",
+    "training_type":  "full_fine_tuning",
+    "manifest_csv":  "data/manifests/manifest_v1/all_utterances.csv",
+    "audio_root":  "data/processed_candidate2",
+    "output_root":  "results/whisper_small_earlystop_v1",
+    "train_samples":  180692,
+    "validation_samples":  33391,
+    "max_epochs":  5,
+    "early_stopping":  {
+                           "enabled":  true,
+                           "monitor":  "validation_cer",
+                           "mode":  "min",
+                           "patience":  2,
+                           "min_delta_percentage_points":  0.1,
+                           "evaluation_interval":  "epoch"
+                       },
+    "model_selection":  {
+                            "metric":  "validation_cer",
+                            "mode":  "min",
+                            "save_best_model":  true
+                        },
+    "micro_batch_size":  4,
+    "gradient_accumulation_steps":  4,
+    "effective_batch_size":  16,
+    "learning_rate":  1E-05,
+    "optimizer":  "adamw_fused",
+    "weight_decay":  0.01,
+    "scheduler":  "linear",
+    "warmup_ratio":  0.05,
+    "max_grad_norm":  1.0,
+    "precision":  "bf16",
+    "attention_implementation":  "sdpa",
+    "gradient_checkpointing":  false,
+    "seed":  42,
+    "steps_per_epoch":  11294,
+    "max_optimizer_steps":  56470,
+    "checkpoint_every_steps":  1000,
+    "evaluation":  {
+                       "split":  "validation",
+                       "every_epoch":  true,
+                       "metrics":  [
+                                       "cer",
+                                       "wer",
+                                       "macro_group_cer"
+                                   ],
+                       "group_metrics":  true,
+                       "use_test_during_training":  false
+                   },
+    "references":  {
+                       "baseline_validation_cer":  30.242451889773093,
+                       "full_v1_validation_cer":  10.482031527193472
+                   }
+}
