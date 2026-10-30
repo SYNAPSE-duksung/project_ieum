@@ -2,7 +2,9 @@ import json
 from pathlib import Path
 
 import librosa
+import soundfile as sf
 import torch
+
 from transformers import (
     WhisperFeatureExtractor,
     WhisperForConditionalGeneration,
@@ -47,6 +49,14 @@ def load_model():
         **processor_config["feature_extractor"]
     )
 
+    generation_config = _model.generation_config
+
+    generation_config.language = "korean"
+    generation_config.task = "transcribe"
+    generation_config.max_length = 160
+    generation_config.do_sample = False
+    generation_config.num_beams = 1
+
 
 def transcribe(audio_path: str) -> str:
     load_model()
@@ -54,33 +64,48 @@ def transcribe(audio_path: str) -> str:
     audio_path = Path(audio_path)
 
     if not audio_path.is_file():
-        raise FileNotFoundError(f"음성 파일을 찾을 수 없습니다: {audio_path}")
+        raise FileNotFoundError(
+            f"음성 파일을 찾을 수 없습니다: {audio_path}"
+        )
 
-    audio, sampling_rate = librosa.load(
+    audio, sr = sf.read(
         str(audio_path),
-        sr=16000,
-        mono=True,
+        dtype="float32",
+        always_2d=True,
     )
+
+    audio = audio.mean(axis=1)
+
+    if sr != 16000:
+        audio = librosa.resample(
+            audio,
+            orig_sr=sr,
+            target_sr=16000,
+        )
 
     if len(audio) == 0:
         raise ValueError("음성 파일이 비어 있습니다.")
 
-    if len(audio) > 30 * sampling_rate:
-        raise ValueError("현재 추론 코드는 30초 이하 음성만 지원합니다.")
+    if len(audio) > 30 * 16000:
+        raise ValueError(
+            "현재 추론 코드는 30초 이하 음성만 지원합니다."
+        )
 
-    inputs = _feature_extractor(
+    extracted = _feature_extractor(
         audio,
-        sampling_rate=sampling_rate,
+        sampling_rate=16000,
         return_tensors="pt",
+        return_attention_mask=True,
     )
 
-    input_features = inputs.input_features.to(DEVICE)
+    input_features = extracted.input_features.to(DEVICE)
+    attention_mask = extracted.attention_mask.to(DEVICE)
 
     with torch.inference_mode():
         predicted_ids = _model.generate(
-            input_features,
-            language="korean",
-            task="transcribe",
+            input_features=input_features,
+            attention_mask=attention_mask,
+            generation_config=_model.generation_config,
         )
 
     text = _tokenizer.batch_decode(
@@ -99,4 +124,5 @@ if __name__ == "__main__":
         sys.exit(1)
 
     result = transcribe(sys.argv[1])
+
     print("인식 결과:", result)
