@@ -1,0 +1,10 @@
+{
+  "data_root": "H:\\.shortcut-targets-by-id\\15z9OYaGiLG_KO6Fuatrkgs1DNbD-D50q\\ieum_project\\00_data",
+  "model": "openai/whisper-small",
+  "language": "ko",
+  "task": "transcribe",
+  "dtype": "float16",
+  "sample_rate": 16000,
+  "num_beams": 1,
+  "note": "Path/settings reference only. CLI arguments control execution; actual immutable configuration is saved as run_config.json. No reference text is passed to model generation."
+}

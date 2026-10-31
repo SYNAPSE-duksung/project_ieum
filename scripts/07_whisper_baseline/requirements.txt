@@ -1,0 +1,6 @@
+# Install torch separately from the official cu128 index (see README).
+transformers==4.53.3
+numpy==2.2.6
+scipy==1.15.3
+soundfile==0.13.1
+jiwer==4.0.0
