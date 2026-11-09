@@ -4,7 +4,8 @@ outputs/
 *.pth
 *.wav
 *.mp3
-*.log# =========================
+*.log
+# =========================
 # Research data / outputs
 # =========================
 data/
@@ -24,6 +25,7 @@ credentials/
 # =========================
 .venv/
 .venv_smoke/
+.venv_local_pilot/
 venv/
 __pycache__/
 *.py[cod]
@@ -72,3 +74,6 @@ scripts/03_preprocessing_pilot/reference_code/
 
 # Old / backup scripts
 scripts/**/*.before_*.py
+
+/checkpoints/
+data/splits/
