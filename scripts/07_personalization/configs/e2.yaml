@@ -1,0 +1,8 @@
+# E2: General Whisper Small + unweighted auxiliary syllable/digit CTC.
+# Inherit every E1 data/training setting; no duplicated hyperparameters.
+e1_config: e1.yaml
+output_root: outputs/personalization/E2
+lambda_ctc_values: [0.03, 0.1, 0.3]
+pilot_speaker: KSM_M_45
+expected_pilot_splits: {train: 168, val: 65, test: 67}
+unsupported_character_policy: error
