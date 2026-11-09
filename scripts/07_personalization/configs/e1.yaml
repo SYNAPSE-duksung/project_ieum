@@ -1,0 +1,38 @@
+# E1 - Ordinary Full Fine-tuning
+# Whisper Small Encoder + Decoder
+
+paths:
+  general_model: C:/Users/DS/Desktop/ieum/project_ieum/checkpoints/whisper_small_general_v1/model
+  manifest_csv: C:/Users/DS/Desktop/ieum/project_ieum/data/splits/personalization_split.csv
+  audio_root: C:/Users/DS/Desktop/ieum/ieum_datasets
+  # output_root: C:/Users/DS/Desktop/ieum/project_ieum/outputs/personalization/E1
+  output_root: C:/Users/DS/Desktop/ieum/project_ieum/outputs/personalization/E1_v2
+
+columns:
+  speaker: speaker_id
+  split: personal_split
+  audio: audio_member
+  text: text
+
+split_labels:
+  train: profile_train
+  val: personal_val
+  test: personal_test
+
+recording_id_column: recording_id
+
+language: korean
+task: transcribe
+
+training:
+  seed: 42
+  epochs: 5
+  learning_rate: 0.00001
+  batch_size: 2
+  eval_batch_size: 2
+  gradient_accumulation: 4
+  warmup_ratio: 0.0
+  gradient_checkpointing: true
+  generation_max_length: 160
+  max_audio_seconds: 30.0
+  logging_steps: 20
