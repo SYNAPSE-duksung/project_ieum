@@ -1,0 +1,10 @@
+e1_config: e1.yaml
+speaker: KSM_M_45
+output_root: outputs/personalization/E2_controlled/KSM_M_45
+accumulation: legacy_e1
+verification_dir: verification_v2
+experiments:
+  R1: {lambda_ctc: 0.03, ctc_enabled: true}
+  R2: {lambda_ctc: 0.0, ctc_enabled: false}
+expected_splits: {train: 168, val: 65}
+save_policy: {strategy: best, model_only: true, total_limit: 1}
