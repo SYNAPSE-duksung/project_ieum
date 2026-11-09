@@ -1,0 +1,4 @@
+# TTS-only environment. Never install this into the ASR .venv.
+piper-tts==1.8.0
+onnxruntime==1.31.1
+pathvalidate==3.3.1

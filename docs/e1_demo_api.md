@@ -73,7 +73,7 @@ curl.exe -X POST http://127.0.0.1:8000/transcribe/compare -F "speaker_id=KSM_M_4
 
 `piper_executable`, `piper_model`, `piper_config`, `tts_output`을 YAML로 설정한다. 실행 파일은 `IEUM_PIPER_EXECUTABLE`로도 지정할 수 있다. integration과 동일하게 `piper -m MODEL -c CONFIG -f OUTPUT`에 텍스트를 stdin으로 전달한다. 한국어 모델은 자동 다운로드/설치하지 않는다.
 
-실행 파일과 음성 모델/설정이 없으면 ASR 서버는 계속 실행되고 `/health`는 `tts_ready=false`, `/tts`는 503을 반환한다. 합성은 최대 60초이며 UUID 파일을 만들고 HTTP 전송이 끝나면 해당 임시 WAV를 삭제한다. 공백 텍스트는 400이며 입력은 최대 2000자다. 실제 한국어 발음 품질과 Piper 버전 호환성은 설치 후 검증해야 한다.
+실행 파일과 음성 모델/설정이 없으면 ASR 서버는 계속 실행되고 `/health`는 `tts_ready=false`, `/tts`는 503을 반환한다. 합성은 최대 60초이며 UUID 파일을 만들고 HTTP 전송이 끝나면 해당 임시 WAV를 삭제한다. 공백 텍스트는 400이며 입력은 최대 2000자다. 2026-11-10 현재 로컬 Windows 서버의 설치·합성·실제 HTTP 검증은 완료했으며 아래 TTS 전용 절차를 따른다. 실제 한국어 발음 품질은 청취 확인이 별도로 필요하다.
 
 ## 검증 결과 (2026-11-09)
 
@@ -95,3 +95,76 @@ $env:PYTHONDONTWRITEBYTECODE='1'
 검증 환경: RTX5060, torch2.7.1+cu128, transformers5.18.0, fastapi0.162.2, uvicorn0.54.0, python-multipart0.0.33, httpx0.28.1. Transformers의 생성 인자 관련 deprecation 경고는 발생했으나 추론과 비교는 통과했다.
 
 실제 Raspberry Pi 하드웨어, LAN HTTP 통신/방화벽, GPIO, 녹음, 오디오 재생, Piper 실제 합성은 검증하지 않았다. 서버 API는 ASGI 내부 호출로 검증했으며 외부에 서버를 계속 띄워 두지 않았다. 실제 장치에서 동일 WAV fixture 업로드 → 실제 마이크 순으로 확인한다. 이 작업에서는 Raspberry Pi 소스 복사/수정, 추가 학습, Git push, 브랜치 merge를 수행하지 않았다.
+
+## TTS 전용 환경과 실제 검증 (2026-11-10)
+
+위 2026-11-09 검증 당시 미설정이던 Piper를 설치했다. ASR `.venv`와 분리된 **`.venv_tts`**에만 설치하며, 서버 자체는 계속 ASR `.venv`로 실행한다. Piper는 CPU용 ONNX Runtime을 사용하므로 Whisper의 CUDA 패키지를 바꾸지 않는다.
+
+새 환경 재구성은 프로젝트 루트에서 다음 순서로 실행한다. 아래 명령은 설치된 로컬 환경에서 다시 실행할 필요가 없다. 다운로드 스크립트는 기존 모델을 덮어쓰지 않으므로 새 경로에 모델을 준비할 때만 실행한다.
+
+```powershell
+.\.venv\Scripts\python.exe -m venv .venv_tts
+.\.venv_tts\Scripts\python.exe -m pip install -r requirements_tts.txt
+.\.venv_tts\Scripts\python.exe scripts/08_demo/download_tts_voice.py
+```
+
+실제 설치 버전은 Piper1.8.0, onnxruntime1.31.1, pathvalidate3.3.1이다. 전체 의존 패키지 기록은 `outputs/e1_demo/tts_verification_20261110/tts_packages.txt`에 있다.
+
+설정 파일은 다음과 같다. 실행 경로는 서버의 현재 디렉터리가 아닌 프로젝트 루트를 기준으로 해석한다. 서버 프로세스의 PATH에 TTS 가상환경을 추가하거나 ASR 환경을 바꿀 필요가 없다.
+
+```yaml
+piper_executable: .venv_tts/Scripts/piper.exe
+piper_model: piper/ko_KR-kss-medium.onnx
+piper_config: piper/ko_KR-kss-medium.onnx.json
+tts_output: outputs/e1_demo/tts
+```
+
+Linux 서버에서는 별도 환경을 구성한 뒤 `IEUM_PIPER_EXECUTABLE`을 해당 서버의 절대 경로 또는 `.venv_tts/bin/piper`로 지정한다. Python 패키지 가상환경을 Windows에서 Linux로 복사하지 않는다. `IEUM_PIPER_EXECUTABLE` 등의 기존 환경변수가 있으면 YAML보다 우선하므로 오래된 설정을 확인한다. YAML은 시작 시 읽으므로 실행 중이던 서버는 재시작해야 한다.
+
+모델은 공식 `rhasspy/piper-voices`의 한국어 KSS medium이며 ONNX 63,221,984바이트, JSON 5,232바이트다. 다운로드한 저장소 revision은 `e7229f7d33a10e145e109b886d661984201ac3c4`이며 모델·설정·모델 카드의 URL과 SHA256은 `piper/voice_provenance.json`에 보관했다. Piper 엔진은 GPL-3.0-or-later이고 모델 카드의 학습 데이터 라이선스는 CC BY-NC-SA 4.0이다. 해당 모델 카드와 라이선스를 배포·사용 범위 검토에 함께 보관한다.
+
+모델과 가상환경은 `.gitignore`에서 제외한다. 생성 WAV와 검증 결과도 기존 `outputs/` 제외 규칙을 따른다. 모델·의존성을 Git에 넣지 않는다.
+
+### 서버 실행 및 요청
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --workers 1
+curl.exe http://127.0.0.1:8000/health
+```
+
+정상 설치 시 `tts_ready`는 `true`다. `/tts`는 `speaker_id`나 오디오 파일을 받지 않으며 **UTF-8 JSON의 text**만 받는다. ASR의 `personalized_text`를 이 필드에 넣으면 된다. 음성은 KSS 합성 화자의 목소리이며 KSM_M_45 음성 복제가 아니다.
+
+Raspberry Pi 담당자는 코드 변경 없이 다음 HTTP 요청으로 먼저 확인할 수 있다. 아래는 Pi/Linux shell 명령이며 Windows PowerShell 인용 규칙과 다르다.
+
+```bash
+curl --fail --show-error http://SERVER_PC_IP:8000/health
+curl --fail --show-error -X POST http://SERVER_PC_IP:8000/tts \
+  -H 'Content-Type: application/json; charset=utf-8' \
+  --data '{"text":"안녕하세요. 이음 음성 안내입니다."}' \
+  --output tts_test.wav
+aplay tts_test.wav
+```
+
+성공 응답은 HTTP200, `Content-Type: audio/wav`, `Content-Disposition: attachment; filename="tts_<UUID>.wav"`다. WAV는 **22,050Hz, mono, PCM16**이다. ASR 입력의 16kHz와 다르므로 수신 파일을 임의로 16kHz로 해석하지 않는다. WAV 헤더에 따라 재생한다. 응답은 스트리밍 PCM이나 JSON/base64가 아니라 WAV 파일 자체다. 서버 임시 파일은 전송 완료 후 삭제되며, 클라이언트가 저장한 파일은 유지된다. 합성은 요청마다 Piper 프로세스와 음성 모델을 로딩하는 기존 방식이므로 고빈도 실시간 스트리밍 엔진은 아니다.
+
+공백 입력은400, 입력 text 누락/2000자 초과는422, 환경 미설정은503, 합성 실패/시간 초과는500이다. 오류 시 JSON `detail`을 확인한다. 서버 합성 제한은60초이므로 클라이언트 HTTP 대기는 연결·전송 여유를 포함해70~90초로 설정할 수 있다. 기존 클라이언트의60초 설정은 이번 약2.3초 요청에서는 충분했으나 긴 문장에서는 별도 확인한다.
+
+### 실제 검증 결과
+
+```powershell
+$env:PYTHONDONTWRITEBYTECODE='1'
+.\.venv\Scripts\python.exe scripts/08_demo/test_tts.py
+```
+
+검증 스크립트는 실제 두 ASR 모델을 로딩하는 Uvicorn 서버를 임의의 localhost 포트로 실행하고 직접 합성·HTTP 응답을 검사한 뒤 자신이 시작한 서버만 종료한다. 기존 실행 중 서버에는 연결하거나 종료 명령을 보내지 않는다. 기존 날짜의 검증 결과는 덮어쓰지 않는다.
+
+테스트 문장: `안녕하세요. 이음 음성 안내입니다. 오늘 저녁에 약속 있어.`
+
+| 경로 | 형식 | 샘플레이트 | 길이 | 크기 | RMS | 소요 시간 |
+|---|---|---:|---:|---:|---:|---:|
+| Piper 직접 합성 | mono PCM16 WAV | 22,050Hz | 5.085초 | 224,300바이트 | 0.173861 | 2.340초 |
+| 실제 HTTP `/tts` | mono PCM16 WAV | 22,050Hz | 5.016초 | 221,228바이트 | 0.172264 | 2.267초 |
+
+Piper의 확률적 합성으로 직접/API 음성 길이와 샘플이 완전히 같을 필요는 없다. 두 파일 모두 정상 디코딩·유한한 샘플·비무음을 확인했다. `/health`의 `tts_ready=true`, HTTP200 WAV 반환, 전송 후 임시 파일 정리, 공백 입력400을 통과했다. 검증 구간에 보호한 기존 연구/모델 파일41개의 SHA256과 ASR 환경 패키지 목록이 동일했다.
+
+결과: `outputs/e1_demo/tts_verification_20261110/results.json`. 청취용 보존 파일은 같은 폴더의 `direct_korean.wav`, `api_korean.wav`다. 스피커 청취·한국어 발음 정확성의 주관 평가·Raspberry Pi 실제 재생·LAN 통신은 아직 검증하지 않았다. 브라우저/오디오 플레이어로 파일을 열어 청취하고 팀 장치에서도 위 요청을 확인한다. Git commit/push/merge 및 라즈베리파이 소스 변경은 하지 않았다.

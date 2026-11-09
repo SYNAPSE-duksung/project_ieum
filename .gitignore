@@ -77,3 +77,7 @@ scripts/**/*.before_*.py
 
 /checkpoints/
 data/splits/
+
+# Local Piper TTS runtime and voice assets
+/.venv_tts/
+/piper/

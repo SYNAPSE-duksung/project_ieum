@@ -5,7 +5,7 @@ personalized_processor: outputs/personalization/E1/KSM_M_45/best_model
 device: auto
 precision: auto
 max_upload_bytes: 33554432
-piper_executable: piper
+piper_executable: .venv_tts/Scripts/piper.exe
 piper_model: piper/ko_KR-kss-medium.onnx
 piper_config: piper/ko_KR-kss-medium.onnx.json
 tts_output: outputs/e1_demo/tts
