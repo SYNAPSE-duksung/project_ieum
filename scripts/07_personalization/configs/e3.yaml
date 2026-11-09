@@ -1,0 +1,12 @@
+# Fixed General-hypothesis ranking, independent of E2/CTC.
+e1_config: e1.yaml
+output_root: outputs/personalization/E3
+general_predictions: outputs/personalization/error_profiles/predictions.csv
+general_profile: outputs/personalization/error_profiles/profiles/KSM_M_45.json
+speaker: KSM_M_45
+lambda_correction: 0.1
+margin: 0.1
+# Match historical E1's actual unscaled microbatch-gradient accumulation.
+# Use mean only for paired experiments sharing the corrected mean convention.
+accumulation_mode: legacy_e1
+expected_splits: {train: 168, val: 65, test: 67}
