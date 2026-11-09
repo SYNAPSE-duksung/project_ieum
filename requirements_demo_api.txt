@@ -1,0 +1,6 @@
+# Additions to the existing tested research environment; no torch replacement.
+fastapi==0.162.2
+uvicorn==0.54.0
+python-multipart==0.0.33
+httpx==0.28.1
+PyYAML==6.0.3
