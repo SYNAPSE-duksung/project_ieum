@@ -1,25 +1,26 @@
+
 from fastapi import FastAPI, UploadFile, File
 from whisper_model import transcribe
-from gemini_model import correct
 
 import shutil
 import os
 import time
+from pathlib import Path
 
 app = FastAPI()
 
-# 현재 파일(main.py) 기준 backend 폴더
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# 현재 main.py가 있는 backend 폴더
+BASE_DIR = Path(__file__).resolve().parent
 
-# 업로드 폴더
-UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+# 업로드한 음성 파일 저장 폴더
+UPLOAD_FOLDER = BASE_DIR / "uploads"
+UPLOAD_FOLDER.mkdir(exist_ok=True)
 
 
 @app.get("/")
 def root():
     return {
-        "message": "Hello IEUM"
+        "message": "Hello IEUM - General ASR"
     }
 
 
@@ -28,55 +29,35 @@ async def upload_audio(audio: UploadFile = File(...)):
 
     start_time = time.time()
 
-    save_path = os.path.join(
-        UPLOAD_FOLDER,
-        audio.filename
-    )
+    # 업로드 파일명에서 경로 부분 제거
+    filename = os.path.basename(audio.filename or "audio.wav")
+    save_path = UPLOAD_FOLDER / filename
 
-    # -----------------------------
-    # 파일 저장
-    # -----------------------------
+    # 1. 음성 파일 저장
     try:
-
         with open(save_path, "wb") as buffer:
             shutil.copyfileobj(audio.file, buffer)
 
     except Exception as e:
-
         return {
             "success": False,
             "stage": "upload",
             "error": str(e)
         }
 
-    # -----------------------------
-    # Whisper
-    # -----------------------------
+    # 2. IEUM 범용 ASR 음성 인식
     try:
-
-        asr_text = transcribe(save_path)
+        asr_text = transcribe(str(save_path))
 
     except Exception as e:
-
         return {
             "success": False,
-            "stage": "whisper",
+            "stage": "general_asr",
             "error": str(e)
         }
 
-    # -----------------------------
-    # Gemini
-    # -----------------------------
-    try:
-
-        corrected_text = correct(asr_text)
-
-    except Exception as e:
-
-        print(f"[Gemini Error] {e}")
-
-        # Gemini 실패 시 Whisper 결과 그대로 사용
-        corrected_text = asr_text
+    # 3. Gemini 없이 인식 결과 그대로 사용
+    corrected_text = asr_text
 
     processing_time = round(
         time.time() - start_time,
@@ -84,15 +65,9 @@ async def upload_audio(audio: UploadFile = File(...)):
     )
 
     return {
-
         "success": True,
-
-        "filename": audio.filename,
-
+        "filename": filename,
         "asr": asr_text,
-
         "corrected": corrected_text,
-
         "processing_time_sec": processing_time
-
     }
